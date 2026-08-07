@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/XSAM/otelsql"
-	_ "github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -67,6 +67,13 @@ type ShipmentEvent struct {
 	CreatedAt  string `json:"createdAt"`
 }
 
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -77,12 +84,18 @@ func main() {
 	}
 	defer shutdownTelemetry(context.Background())
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "orders:orders@tcp(mysql-haproxy:3306)/orders?parseTime=true"
-	}
+	// Build the DSN from discrete parts via mysql.Config so the
+	// operator-generated password (which may contain characters that break a
+	// raw user:pass@tcp(...) DSN) is treated as opaque.
+	dbCfg := mysqldriver.NewConfig()
+	dbCfg.Net = "tcp"
+	dbCfg.Addr = getenv("MYSQL_HOST", "mysql-haproxy") + ":" + getenv("MYSQL_PORT", "3306")
+	dbCfg.User = getenv("MYSQL_USER", "orders")
+	dbCfg.Passwd = os.Getenv("MYSQL_PASSWORD")
+	dbCfg.DBName = getenv("MYSQL_DATABASE", "orders")
+	dbCfg.ParseTime = true
 
-	db, err = otelsql.Open("mysql", dbURL,
+	db, err = otelsql.Open("mysql", dbCfg.FormatDSN(),
 		otelsql.WithAttributes(semconv.DBSystemNameMySQL),
 	)
 	if err != nil {

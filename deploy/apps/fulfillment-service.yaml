@@ -33,15 +33,21 @@ spec:
               value: kafka-kafka-bootstrap:9092
             - name: INVENTORY_SERVICE_URL
               value: http://inventory-service:8080
-            # MYSQL_PASSWORD must be defined before DATABASE_URL for $(VAR)
-            # substitution to work.
+            # Discrete DB parts (not a DSN): the operator-generated password
+            # may contain characters that break a user:pass@tcp(...) DSN.
+            - name: MYSQL_HOST
+              value: mysql-haproxy
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: orders
+            - name: MYSQL_DATABASE
+              value: orders
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql-custom-user-secret
                   key: orders
-            - name: DATABASE_URL
-              value: "orders:$(MYSQL_PASSWORD)@tcp(mysql-haproxy:3306)/orders?parseTime=true"
           resources:
             requests:
               cpu: 100m

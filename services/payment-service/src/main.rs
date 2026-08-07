@@ -13,7 +13,7 @@ use opentelemetry_sdk::Resource;
 use rand::Rng;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 use sqlx::types::Json;
 use sqlx::MySqlPool;
 use std::env;
@@ -398,12 +398,25 @@ async fn init_db(pool: &MySqlPool) {
 async fn main() -> std::io::Result<()> {
     let telemetry = init_telemetry();
 
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    // Build connection options from discrete parts rather than a URL: the
+    // operator-generated MySQL password can contain URL-reserved characters,
+    // which would break mysql:// URL parsing. Passed this way it stays opaque.
+    let db_opts = MySqlConnectOptions::new()
+        .host(&env::var("MYSQL_HOST").unwrap_or_else(|_| "mysql-haproxy".to_string()))
+        .port(
+            env::var("MYSQL_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(3306),
+        )
+        .username(&env::var("MYSQL_USER").expect("MYSQL_USER must be set"))
+        .password(&env::var("MYSQL_PASSWORD").expect("MYSQL_PASSWORD must be set"))
+        .database(&env::var("MYSQL_DATABASE").unwrap_or_else(|_| "payments".to_string()));
 
     let pool = MySqlPoolOptions::new()
         .max_connections(25)
         .acquire_timeout(Duration::from_secs(30))
-        .connect(&database_url)
+        .connect_with(db_opts)
         .await
         .expect("Failed to create pool");
 

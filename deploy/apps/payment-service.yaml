@@ -29,15 +29,21 @@ spec:
           env:
             - name: OTEL_SERVICE_NAME
               value: payment-service
-            # MYSQL_PASSWORD must be defined before DATABASE_URL for $(VAR)
-            # substitution to work.
+            # Discrete DB parts (not a URL): the operator-generated password
+            # may contain URL-reserved characters.
+            - name: MYSQL_HOST
+              value: mysql-haproxy
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: payments
+            - name: MYSQL_DATABASE
+              value: payments
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql-custom-user-secret
                   key: payments
-            - name: DATABASE_URL
-              value: "mysql://payments:$(MYSQL_PASSWORD)@mysql-haproxy:3306/payments"
           resources:
             requests:
               cpu: 100m

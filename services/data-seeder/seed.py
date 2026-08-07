@@ -33,7 +33,7 @@ MYSQL_PAYMENTS_USER = os.getenv("MYSQL_PAYMENTS_USER", "payments")
 MYSQL_PAYMENTS_PASSWORD = os.getenv("MYSQL_PAYMENTS_PASSWORD", "")
 MYSQL_PAYMENTS_DB = "payments"
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/reviews")
-VALKEY_URL = os.getenv("VALKEY_URL", "redis://valkey:6379/0")
+VALKEY_URL = os.getenv("VALKEY_URL", "redis://valkey-valkey:6379")
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5000"))
 TARGET_SIZE_GB = float(os.getenv("TARGET_SIZE_GB", "10"))
@@ -447,9 +447,22 @@ def seed_mysql_orders():
 
 def seed_mongodb_reviews():
     from pymongo import MongoClient
-    client = wait_for_connection(lambda: MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000).admin.command('ping') or MongoClient(MONGO_URI), "MongoDB")
+    # Credentials as kwargs (not in the URI): the operator-generated password
+    # may contain URI-reserved characters.
+    mongo_kwargs = {}
+    if os.getenv("MONGO_USER"):
+        mongo_kwargs = {
+            "username": os.getenv("MONGO_USER"),
+            "password": os.getenv("MONGO_PASSWORD"),
+            "authSource": os.getenv("MONGO_AUTH_SOURCE", "admin"),
+        }
+    client = wait_for_connection(
+        lambda: MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, **mongo_kwargs).admin.command('ping')
+        or MongoClient(MONGO_URI, **mongo_kwargs),
+        "MongoDB",
+    )
     if not isinstance(client, MongoClient):
-        client = MongoClient(MONGO_URI)
+        client = MongoClient(MONGO_URI, **mongo_kwargs)
 
     db = client.get_default_database()
     coll = db.reviews
@@ -504,13 +517,20 @@ def seed_mongodb_reviews():
 
 
 def seed_valkey_carts():
-    import redis as redis_lib
-    r = wait_for_connection(lambda: redis_lib.from_url(VALKEY_URL, decode_responses=True, socket_connect_timeout=5) or True, "Valkey")
-    if not isinstance(r, redis_lib.Redis):
-        r = redis_lib.from_url(VALKEY_URL, decode_responses=True)
+    from redis.cluster import RedisCluster
+    # Valkey Cluster mode: a cluster-aware client. Each command below targets a
+    # single key, so the pipeline is split per node (no CROSSSLOT).
+    r = wait_for_connection(
+        lambda: RedisCluster.from_url(VALKEY_URL, decode_responses=True, socket_connect_timeout=5) or True,
+        "Valkey",
+    )
+    if not isinstance(r, RedisCluster):
+        r = RedisCluster.from_url(VALKEY_URL, decode_responses=True)
 
     r.ping()
-    existing_keys = r.dbsize()
+    # dbsize() on a cluster returns a per-node mapping; sum across primaries.
+    size = r.dbsize()
+    existing_keys = sum(size.values()) if isinstance(size, dict) else size
     log.info(f"Valkey: {existing_keys} existing keys")
 
     # Valkey 10GB: lots of cart data + product cache + session data

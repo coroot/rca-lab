@@ -29,15 +29,19 @@ spec:
           env:
             - name: OTEL_SERVICE_NAME
               value: review-service
-            # MONGO_PASSWORD must be defined before MONGODB_URI for $(VAR)
-            # substitution to work.
+            # Credentials passed as driver options (see src/index.js), so the
+            # URI carries no password (which may contain URI-breaking chars).
+            - name: MONGODB_URI
+              value: "mongodb://mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&readPreference=secondaryPreferred"
+            - name: MONGO_USER
+              value: reviews
+            - name: MONGO_AUTH_SOURCE
+              value: reviews
             - name: MONGO_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mongodb-custom-user-secret
                   key: reviews
-            - name: MONGODB_URI
-              value: "mongodb://reviews:$(MONGO_PASSWORD)@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&readPreference=secondaryPreferred"
           resources:
             requests:
               cpu: 100m

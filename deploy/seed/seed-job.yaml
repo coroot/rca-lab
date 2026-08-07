@@ -21,7 +21,7 @@ spec:
       containers:
         - name: data-seeder
           image: ghcr.io/coroot/rca-lab/data-seeder:1.0.0
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           env:
             # PostgreSQL (Percona PG operator secrets; via pgBouncer)
             - name: PG_PRODUCTS_URL

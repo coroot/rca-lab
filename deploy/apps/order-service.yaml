@@ -20,7 +20,7 @@ spec:
       containers:
         - name: order-service
           image: ghcr.io/coroot/rca-lab/order-service:1.0.0
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           envFrom:

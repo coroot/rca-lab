@@ -20,7 +20,7 @@ spec:
       containers:
         - name: api-gateway
           image: ghcr.io/coroot/rca-lab/api-gateway:1.0.0
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           envFrom:

@@ -20,7 +20,7 @@ spec:
       containers:
         - name: product-catalog
           image: ghcr.io/coroot/rca-lab/product-catalog:1.0.0
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           envFrom:

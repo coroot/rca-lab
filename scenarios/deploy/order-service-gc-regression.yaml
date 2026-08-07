@@ -33,5 +33,11 @@ spec:
           kind: Deployment
           name: order-service
         container: order-service
+        # The regression image (a bad-deploy variant). Its tag is declared in
+        # services/order-service/variants/allocation-regression/variant.yaml
+        # and recorded in variants/registry.yaml.
         image: ghcr.io/coroot/rca-lab/order-service:1.1.0
-        knownGoodImage: ghcr.io/coroot/rca-lab/order-service:1.0.0
+        # knownGoodImage is intentionally omitted: the operator records the
+        # image order-service is actually running when the scenario activates
+        # and rolls back to exactly that, so the rollback target never drifts
+        # from whatever base version is deployed.

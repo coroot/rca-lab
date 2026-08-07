@@ -83,7 +83,12 @@ jobs:
           context: ${{ matrix.context }}
           platforms: linux/amd64
           push: ${{ github.event_name == 'push' }}
-          tags: ghcr.io/coroot/rca-lab/${{ matrix.name }}:${{ matrix.version }}
+          # Immutable per-commit tag (what `make deploy` resolves to), plus the
+          # readable semver and a moving latest.
+          tags: |
+            ghcr.io/coroot/rca-lab/${{ matrix.name }}:sha-${{ github.sha }}
+            ghcr.io/coroot/rca-lab/${{ matrix.name }}:${{ matrix.version }}
+            ghcr.io/coroot/rca-lab/${{ matrix.name }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
 
@@ -102,3 +107,13 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" \
             | tar -xz gitleaks
           ./gitleaks git . --redact --no-banner --verbose
+
+  validate-scenarios:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate scenario image references
+        run: |
+          pip install --quiet pyyaml
+          python3 scripts/gen-variant-registry.py
+          python3 scripts/check-scenario-images.py

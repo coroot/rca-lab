@@ -206,9 +206,40 @@ apply_apps() {
         warn "deploy/apps not present yet; skipping application deploy"
         return
     fi
-    info "Deploying applications"
-    kubectl apply -k deploy/apps
+    info "Deploying applications (image tags from versions.yaml)"
+    apply_kustomize_with_image_tags deploy/apps
     kubectl wait --for=condition=Available deployment -l part-of=rca-lab -n default --timeout=10m
+}
+
+# Emits kustomize `images:` entries pinning every ghcr.io/coroot/rca-lab/<name>
+# image to its versions.yaml tag. Bumping a service's version there (when you
+# change its code) is what makes `kubectl apply` see a new image and roll it
+# out; untouched services keep their tag and are not restarted.
+image_tag_overrides() {
+    awk '
+        /^services:/ {inb=1; next}
+        inb && /^[^[:space:]]/ {inb=0}
+        inb && /^[[:space:]]+[a-z0-9-]+:/ {
+            gsub(/[[:space:]]/, "");
+            split($0, kv, ":");
+            printf "  - name: ghcr.io/coroot/rca-lab/%s\n    newTag: \"%s\"\n", kv[1], kv[2];
+        }
+    ' versions.yaml
+}
+
+apply_kustomize_with_image_tags() {
+    local base=$1 tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    {
+        echo "apiVersion: kustomize.config.k8s.io/v1beta1"
+        echo "kind: Kustomization"
+        echo "resources:"
+        echo "  - $(pwd)/$base"
+        echo "images:"
+        image_tag_overrides
+    } > "$tmp/kustomization.yaml"
+    kubectl apply -k "$tmp"
 }
 
 apply_scenarios() {
@@ -216,7 +247,7 @@ apply_scenarios() {
         return
     fi
     info "Deploying scenario operator + library"
-    kubectl apply -k deploy/rca-operator
+    apply_kustomize_with_image_tags deploy/rca-operator
     kubectl rollout status deployment/rca-lab-operator -n default --timeout=5m
     [ -f scenarios/kustomization.yaml ] && kubectl apply -k scenarios
 }
@@ -232,7 +263,11 @@ seed() {
     fi
     info "Seeding data (${SEED_SIZE_GB} GB total; idempotent)"
     kubectl delete job data-seeder -n default --ignore-not-found >/dev/null
-    sed "s/__SEED_SIZE_GB__/$SEED_SIZE_GB/" deploy/seed/seed-job.yaml | kubectl apply -f -
+    local seeder_tag
+    seeder_tag="$(image_tag_overrides | awk '/data-seeder/{getline; gsub(/[[:space:]"]/,""); sub(/newTag:/,""); print}')"
+    sed -e "s/__SEED_SIZE_GB__/$SEED_SIZE_GB/" \
+        -e "s#\(data-seeder\):[A-Za-z0-9._-]*#\1:${seeder_tag}#" \
+        deploy/seed/seed-job.yaml | kubectl apply -f -
     kubectl wait --for=condition=complete job/data-seeder -n default --timeout=30m
 }
 

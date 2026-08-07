@@ -51,7 +51,20 @@ POOL_IP = [fake.ipv4() for _ in range(2000)]
 POOL_WORD = [fake.word() for _ in range(1000)]
 POOL_COLOR = [fake.color_name() for _ in range(100)]
 POOL_SENTENCE = [fake.sentence(nb_words=random.randint(3, 10)) for _ in range(2000)]
+POOL_ADDRESS = [f"{fake.street_address()}, {fake.city()}, {fake.state()} {fake.zipcode()}" for _ in range(2000)]
 _rc = random.choice
+
+
+def mysql_multi_insert(cur, table, cols, rows):
+    """One multi-row INSERT per batch. mysql.connector's executemany degrades
+    to near row-by-row here (JSON columns), which is the MySQL bottleneck."""
+    if not rows:
+        return
+    ncols = cols.count(",") + 1
+    row_ph = "(" + ",".join(["%s"] * ncols) + ")"
+    placeholders = ",".join([row_ph] * len(rows))
+    flat = [v for row in rows for v in row]
+    cur.execute(f"INSERT INTO {table} ({cols}) VALUES {placeholders}", flat)
 
 
 def generate_large_text(min_len=500, max_len=2000):
@@ -311,9 +324,10 @@ def seed_mysql_payments():
             created = datetime.now() - timedelta(days=days_ago, hours=random.randint(0, 23))
             values.append((uid, order_id, user_id, amount, currency, method, status, tx_ref, metadata, created, created))
 
-        cur.executemany(
-            "INSERT INTO payments (id,order_id,user_id,amount,currency,method,status,transaction_ref,metadata,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            values
+        mysql_multi_insert(
+            cur, "payments",
+            "id,order_id,user_id,amount,currency,method,status,transaction_ref,metadata,created_at,updated_at",
+            values,
         )
         conn.commit()
         inserted += batch
@@ -376,8 +390,9 @@ def seed_mysql_orders():
     """)
     conn.commit()
 
-    cur.execute("SELECT COUNT(*) FROM orders")
-    existing = cur.fetchone()[0]
+    cur.execute("SELECT COALESCE(MAX(id), 0) FROM orders")
+    max_id = cur.fetchone()[0]
+    existing = max_id  # ids are assigned explicitly below, so max ~= count
 
     # Each order ~500 bytes + ~3 items at ~200 bytes each = ~1.1KB per order
     target_rows = int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 1100)
@@ -391,57 +406,38 @@ def seed_mysql_orders():
     log.info(f"Seeding {remaining} orders (~{TARGET_SIZE_GB}GB)")
     inserted = 0
     statuses = ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"]
+    next_id = max_id + 1
 
     while inserted < remaining:
         batch = min(BATCH_SIZE, remaining - inserted)
 
+        # Assign order ids explicitly: PXC (Galera) auto_increment steps by the
+        # cluster size, so arithmetic on LAST_INSERT_ID() would produce wrong
+        # FK references. Explicit ids keep order_items pointing at real orders.
         order_values = []
-        for _ in range(batch):
+        item_values = []
+        for j in range(batch):
+            oid = next_id + j
             user_id = f"user-{random.randint(1, 100000)}"
             status = random.choice(statuses)
             total = round(random.uniform(10.0, 2000.0), 2)
-            address = f"{fake.street_address()}, {fake.city()}, {fake.state()} {fake.zipcode()}"
+            address = _rc(POOL_ADDRESS)
             payment_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=36))
-            order_values.append((user_id, status, total, address, payment_id))
+            order_values.append((oid, user_id, status, total, address, payment_id))
+            for _ in range(random.randint(2, 4)):
+                item_values.append((
+                    oid, f"{random.randint(1, 500000)}",
+                    f"{_rc(POOL_WORD).title()} {_rc(POOL_WORD).title()}",
+                    random.randint(1, 5), round(random.uniform(5.0, 500.0), 2),
+                ))
 
-        cur.executemany(
-            "INSERT INTO orders (user_id,status,total,shipping_address,payment_id) VALUES (%s,%s,%s,%s,%s)",
-            order_values
-        )
+        mysql_multi_insert(cur, "orders", "id,user_id,status,total,shipping_address,payment_id", order_values)
+        # Chunk order_items to keep the statement size sane.
+        for k in range(0, len(item_values), BATCH_SIZE):
+            mysql_multi_insert(cur, "order_items", "order_id,product_id,name,quantity,price", item_values[k:k + BATCH_SIZE])
         conn.commit()
 
-        # Get the range of inserted IDs
-        cur.execute("SELECT LAST_INSERT_ID()")
-        last_id = cur.fetchone()[0]
-        first_id = last_id - batch + 1
-
-        # Insert order items (2-4 items per order)
-        item_values = []
-        for i in range(batch):
-            order_id = first_id + i
-            num_items = random.randint(2, 4)
-            for _ in range(num_items):
-                product_id = f"{random.randint(1, 500000)}"
-                name = f"{_rc(POOL_WORD).title()} {_rc(POOL_WORD).title()}"
-                qty = random.randint(1, 5)
-                price = round(random.uniform(5.0, 500.0), 2)
-                item_values.append((order_id, product_id, name, qty, price))
-
-            if len(item_values) >= 10000:
-                cur.executemany(
-                    "INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (%s,%s,%s,%s,%s)",
-                    item_values
-                )
-                conn.commit()
-                item_values = []
-
-        if item_values:
-            cur.executemany(
-                "INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (%s,%s,%s,%s,%s)",
-                item_values
-            )
-            conn.commit()
-
+        next_id += batch
         inserted += batch
         if inserted % 50000 == 0:
             log.info(f"MySQL orders: {inserted}/{remaining} rows inserted")

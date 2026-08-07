@@ -14,7 +14,7 @@ services:
   recommendation-service: 1.0.0
   fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
   load-generator: 1.0.0
-  data-seeder: 1.0.2          # faster generation (faker pools)
+  data-seeder: 1.0.3          # faker pools + multi-row MySQL inserts
   operator: 1.0.0
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).

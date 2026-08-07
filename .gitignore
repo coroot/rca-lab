@@ -13,3 +13,9 @@ operator/web/node_modules/
 .idea/
 .vscode/
 .DS_Store
+
+# compiled service binaries (dir/name pattern)
+services/*/fulfillment-service
+services/*/load-generator
+services/*/product-catalog
+services/*/recommendation-service

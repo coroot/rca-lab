@@ -26,7 +26,7 @@ db_row valkey   "$(get valkeycluster valkey '{.status.state}')"
 db_row kafka    "$(get kafka kafka '{.status.conditions[?(@.type=="Ready")].status}')"
 
 printf '\n%sAPPLICATIONS%s\n' "$bold" "$rst"
-printf '  %s%-24s %s%s\n' "$dim" "SERVICE" "PODS READY" "$rst"
+printf '  %-24s %s\n' "SERVICE" "PODS READY"
 kubectl get deploy -n default -l part-of=rca-lab \
     -o custom-columns='NAME:.metadata.name,READY:.status.readyReplicas,WANT:.spec.replicas' \
     --no-headers 2>/dev/null | awk -v g="$grn" -v y="$ylw" -v r="$rst" '
@@ -34,19 +34,17 @@ kubectl get deploy -n default -l part-of=rca-lab \
      printf "  %-24s %s%s/%s%s\n",$1,c,ready,$3,r}'
 
 printf '\n%sSCENARIOS%s\n' "$bold" "$rst"
-printf '  %s%-32s %-10s %s%s\n' "$dim" "NAME" "STATE" "FAILURE TYPE" "$rst"
+printf '  %-32s %-10s %s\n' "NAME" "STATE" "FAILURE TYPE"
 scen=$(kubectl get failurescenarios -n default \
     -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,CAT:.spec.category' \
     --no-headers 2>/dev/null || true)
 if [ -n "$scen" ]; then
-    echo "$scen" | awk -v g="$grn" -v y="$ylw" -v d="$dim" -v r="$rst" '
+    echo "$scen" | awk -v g="$grn" -v d="$dim" -v r="$rst" '
         {phase=($2=="<none>"?"Idle":$2);
-         if (phase=="Idle") {label="idle"; c=d} else {label=toupper(phase); c=y}
-         printf "  %-32s %s%-10s%s %s%s%s\n",$1,c,label,r,d,$3,r}'
-    printf '  %sstate: idle = off (normal), ACTIVE = failure injected.\n' "$dim"
-    printf '  trigger a scenario:  kubectl patch failurescenario <name> --type=merge -p '"'"'{"spec":{"enabled":true}}'"'"'%s\n' "$rst"
+         if (phase=="Idle") {label="idle"; c=d} else {label=toupper(phase); c=g}
+         printf "  %-32s %s%-10s%s %s\n",$1,c,label,r,$3}'
 else
-    printf '  %s(scenario operator not installed)%s\n' "$dim" "$rst"
+    printf '  (scenario operator not installed)\n'
 fi
 
 printf '\n%sUNHEALTHY PODS%s\n' "$bold" "$rst"

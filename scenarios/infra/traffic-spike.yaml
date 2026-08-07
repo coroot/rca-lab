@@ -1,0 +1,26 @@
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: traffic-spike
+  namespace: default
+spec:
+  displayName: Traffic spike
+  description: >-
+    The load-generator Deployment is scaled up to 5 replicas: real extra
+    traffic hits the whole stack through the api-gateway. The weakest
+    component saturates first; everything else just gets proportionally
+    busier. Reverting scales the load generator back to its previous size.
+  category: infra
+  severity: medium
+  duration: 15m
+  expectedSymptoms:
+    - Uniform RPS increase across all services behind the api-gateway
+    - Saturation (latency/errors) only at the weakest component, not everywhere
+  actions:
+    - name: scale-up-load
+      type: Scale
+      scale:
+        targetRef:
+          kind: Deployment
+          name: load-generator
+        replicas: 5

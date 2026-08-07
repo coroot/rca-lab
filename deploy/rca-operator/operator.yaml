@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-lab-operator
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    app.kubernetes.io/part-of: rca-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-lab-operator
+  template:
+    metadata:
+      labels:
+        app: rca-lab-operator
+        app.kubernetes.io/part-of: rca-lab
+    spec:
+      serviceAccountName: rca-lab-operator
+      containers:
+        - name: operator
+          image: ghcr.io/coroot/rca-lab/operator:1.0.0
+          args: ["manager"]
+          env:
+            # The operator's own image; also the default image for Workload
+            # scenario Jobs (which run its dbtool subcommand). Keep the tag in
+            # sync with .image above.
+            - name: OPERATOR_IMAGE
+              value: ghcr.io/coroot/rca-lab/operator:1.0.0
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+            - name: metrics
+              containerPort: 8082
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rca-lab-operator
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    app.kubernetes.io/part-of: rca-lab
+spec:
+  selector:
+    app: rca-lab-operator
+  ports:
+    - name: http # web UI (future)
+      port: 8080
+      targetPort: 8080
+    - name: health
+      port: 8081
+      targetPort: 8081
+    - name: metrics
+      port: 8082
+      targetPort: 8082

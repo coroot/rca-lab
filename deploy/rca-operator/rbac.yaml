@@ -1,0 +1,67 @@
+# Least-privilege RBAC for the rca-lab operator: everything it touches lives
+# in the default namespace. Deliberately NO access to Secrets — workload Jobs
+# reference them via secretKeyRef, resolved by the kubelet, not the operator.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rca-lab-operator
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    app.kubernetes.io/part-of: rca-lab
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rca-lab-operator
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    app.kubernetes.io/part-of: rca-lab
+rules:
+  - apiGroups: ["rcalab.dev"]
+    resources:
+      - failurescenarios
+      - failurescenarios/status
+      - failurescenarios/finalizers
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: ["apps"]
+    resources: [deployments/scale]
+    verbs: [get, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  # rca-lab-leaked-state (force-release token dump)
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update]
+  # leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rca-lab-operator
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    app.kubernetes.io/part-of: rca-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rca-lab-operator
+subjects:
+  - kind: ServiceAccount
+    name: rca-lab-operator
+    namespace: default

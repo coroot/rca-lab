@@ -1,0 +1,61 @@
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-analytics-queries
+  namespace: default
+spec:
+  displayName: Analytics queries on the products database
+  description: >-
+    An "analytics-reporting" batch workload starts running heavy multi-join and
+    aggregation queries directly against the production PostgreSQL products
+    database (through pgBouncer, same pool as product-catalog and inventory).
+    The queries do full-table scans of the ~10GB products table and starve the
+    OLTP traffic of CPU, IO and pool connections.
+  category: database
+  severity: high
+  duration: 20m
+  expectedSymptoms:
+    - Elevated latency in product-catalog and inventory-service (shared PostgreSQL cluster)
+    - PostgreSQL CPU and IO saturation on the primary instance
+    - New heavy query fingerprints in pg_stat_statements attributable to the
+      "analytics-reporting" workload (full scans / large aggregations)
+  actions:
+    - name: analytics-reporting
+      type: Workload
+      workload:
+        name: analytics-reporting
+        engine: postgres
+        concurrency: 4
+        interval: 500ms
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: pgbouncer-uri
+        queries:
+          # Category x month revenue-style rollup: full scan + ILIKE filter on
+          # the unindexed description column, then a wide aggregation.
+          - >-
+            SELECT category, date_trunc('month', created_at) AS month,
+                   count(*) AS products, round(avg(price), 2) AS avg_price,
+                   max(price) AS max_price
+            FROM products
+            WHERE description ILIKE '%warranty%'
+            GROUP BY category, month
+            ORDER BY products DESC
+            LIMIT 100
+          # "Duplicate SKU audit": self-join on the unindexed sku column,
+          # forcing two full scans and a very large hash join.
+          - >-
+            SELECT p.category, count(*) AS duplicate_skus
+            FROM products p
+            JOIN products d ON d.sku = p.sku AND d.id < p.id
+            GROUP BY p.category
+            ORDER BY duplicate_skus DESC
+          # Unbounded LIKE search over description plus jsonb metadata
+          # expanded to text: CPU-heavy full scan.
+          - >-
+            SELECT count(*) AS hits, round(avg(price), 2) AS avg_price
+            FROM products
+            WHERE name LIKE '%Ultra%' AND metadata::text LIKE '%metal%'

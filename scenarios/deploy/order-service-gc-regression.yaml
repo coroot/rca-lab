@@ -1,0 +1,37 @@
+# A genuine bad deploy: order-service 1.1.0 is the allocation-regression
+# variant (services/order-service/variants/allocation-regression/) — real code
+# that deep-copies every order read into an ineffective LRU cache. The rollout
+# looks like a normal version bump; the revert is a rollback to 1.0.0.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: order-service-gc-regression
+  namespace: default
+spec:
+  displayName: "Bad deploy: order-service GC pressure"
+  description: >-
+    order-service rolls out version 1.1.0, which introduces an in-memory
+    "recent results" cache whose keys are effectively never reused. Every
+    order read deep-copies its result set into retained maps and strings:
+    allocation rate and old-generation occupancy climb, the JVM spends more
+    and more time in GC, and p99 latency degrades while RPS stays flat.
+    Reverting rolls the Deployment back to the known-good image.
+  category: deploy
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - order-service p99 latency rises shortly after the rollout; p50 mostly flat
+    - JVM allocation rate and GC time/pauses increase (JVM runtime metrics)
+    - heap usage sawtooth trends toward the limit; frequent old-gen collections
+    - no upstream or downstream degradation precedes the deploy
+    - symptom onset correlates exactly with the order-service rollout event
+  actions:
+    - name: roll-out-regression
+      type: DeployImage
+      deployImage:
+        targetRef:
+          kind: Deployment
+          name: order-service
+        container: order-service
+        image: ghcr.io/coroot/rca-lab/order-service:1.1.0
+        knownGoodImage: ghcr.io/coroot/rca-lab/order-service:1.0.0

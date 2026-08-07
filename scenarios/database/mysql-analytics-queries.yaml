@@ -1,0 +1,68 @@
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mysql-analytics-queries
+  namespace: default
+spec:
+  displayName: Analytics queries on the orders database
+  description: >-
+    An "analytics-reporting" batch workload starts running heavy join and
+    aggregation queries directly against the production MySQL orders database
+    (through mysql-haproxy, same path as order-service). The queries do
+    full-table scans and large joins over the ~10GB orders/order_items tables,
+    saturating the PXC nodes.
+  category: database
+  severity: high
+  duration: 20m
+  expectedSymptoms:
+    - Elevated latency and errors in order-service and cart/checkout flows
+    - MySQL (PXC) CPU and IO saturation; growing filesort/temp-table activity
+    - New heavy statements in performance_schema / slow query log attributable
+      to the "analytics-reporting" workload
+  actions:
+    - name: analytics-reporting
+      type: Workload
+      workload:
+        name: analytics-reporting
+        engine: mysql
+        concurrency: 4
+        interval: 500ms
+        env:
+          # MYSQL_PASSWORD must be declared before DATABASE_URL so the
+          # $(MYSQL_PASSWORD) reference expands.
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-custom-user-secret
+                key: orders
+          - name: DATABASE_URL
+            value: orders:$(MYSQL_PASSWORD)@tcp(mysql-haproxy:3306)/orders?parseTime=true
+        queries:
+          # Monthly revenue rollup: full join of orders x order_items with
+          # GROUP BY + ORDER BY over the aggregate (filesort, temp tables).
+          - >-
+            SELECT o.status, DATE_FORMAT(o.created_at, '%Y-%m') AS month,
+                   COUNT(DISTINCT o.id) AS orders,
+                   ROUND(SUM(oi.quantity * oi.price), 2) AS revenue
+            FROM orders o
+            JOIN order_items oi ON oi.order_id = o.id
+            GROUP BY o.status, month
+            ORDER BY revenue DESC
+          # Customer lifetime value: full scan of orders grouped by ~100k
+          # users, sorted by the aggregate.
+          - >-
+            SELECT o.user_id, COUNT(*) AS orders,
+                   ROUND(SUM(o.total), 2) AS lifetime_value
+            FROM orders o
+            GROUP BY o.user_id
+            ORDER BY lifetime_value DESC
+            LIMIT 100
+          # Best-selling "Pro" items: unbounded LIKE over the unindexed
+          # order_items.name column plus a large GROUP BY.
+          - >-
+            SELECT oi.name, SUM(oi.quantity) AS units
+            FROM order_items oi
+            WHERE oi.name LIKE '%Pro%'
+            GROUP BY oi.name
+            ORDER BY units DESC
+            LIMIT 50

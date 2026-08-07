@@ -16,8 +16,11 @@ class Database
             $host = $parts['host'] ?? 'localhost';
             $port = $parts['port'] ?? 5432;
             $dbname = ltrim($parts['path'] ?? '/inventory', '/');
-            $user = $parts['user'] ?? '';
-            $pass = $parts['pass'] ?? '';
+            // parse_url() leaves userinfo percent-encoded; the operator's
+            // pgbouncer-uri encodes special characters in the password, so
+            // decode before handing them to PDO (otherwise SASL auth fails).
+            $user = urldecode($parts['user'] ?? '');
+            $pass = urldecode($parts['pass'] ?? '');
 
             $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};sslmode=require";
 

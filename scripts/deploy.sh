@@ -57,14 +57,16 @@ preflight() {
 # version, run `make clean` first (or upgrade that release manually).
 install_operator() {
     local name=$1 chart=$2 ns=$3 version=$4 values=$5
-    local json
-    json="$(helm list -a -n "$ns" -f "^${name}\$" -o json 2>/dev/null)"
-    if printf '%s' "$json" | grep -q '"status":"deployed"'; then
+    local status
+    # helm status exits non-zero when the release does not exist; its JSON
+    # .info.status is the release state. Works on both Helm v3 and v4.
+    status="$(helm status "$name" -n "$ns" -o json 2>/dev/null | grep -o '"status":"[a-z-]*"' | head -1 | cut -d'"' -f4)"
+    if [ "$status" = "deployed" ]; then
         info "operator $name already deployed (skipping; run 'make clean' to change versions)"
         return
     fi
-    if printf '%s' "$json" | grep -q "\"name\":\"$name\""; then
-        warn "operator $name present but not deployed; reinstalling"
+    if [ -n "$status" ]; then
+        warn "operator $name in state '$status'; reinstalling"
         helm uninstall "$name" -n "$ns" >/dev/null 2>&1 || true
     fi
     helm install "$name" "$chart" -n "$ns" --version "$version" -f "$values" --wait

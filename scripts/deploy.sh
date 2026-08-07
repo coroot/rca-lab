@@ -49,20 +49,37 @@ preflight() {
     fi
 }
 
+# install_operator installs a helm release if it is not already deployed.
+# Operators are installed once, not upgraded on every run: their controllers
+# take ownership of fields in their own Services (e.g. .spec.selector), which
+# makes a plain `helm upgrade` fail with server-side-apply conflicts. A failed
+# or pending release is torn down and reinstalled. To change an operator
+# version, run `make clean` first (or upgrade that release manually).
+install_operator() {
+    local name=$1 chart=$2 ns=$3 version=$4 values=$5
+    local json
+    json="$(helm list -a -n "$ns" -f "^${name}\$" -o json 2>/dev/null)"
+    if printf '%s' "$json" | grep -q '"status":"deployed"'; then
+        info "operator $name already deployed (skipping; run 'make clean' to change versions)"
+        return
+    fi
+    if printf '%s' "$json" | grep -q "\"name\":\"$name\""; then
+        warn "operator $name present but not deployed; reinstalling"
+        helm uninstall "$name" -n "$ns" >/dev/null 2>&1 || true
+    fi
+    helm install "$name" "$chart" -n "$ns" --version "$version" -f "$values" --wait
+}
+
 install_operators() {
     info "Installing operators (helm)"
     kubectl apply -f deploy/namespaces.yaml
     helm repo add percona https://percona.github.io/percona-helm-charts/ >/dev/null
     helm repo add strimzi https://strimzi.io/charts/ >/dev/null
     helm repo update percona strimzi >/dev/null
-    helm upgrade --install pg-operator percona/pg-operator -n pg-operator \
-        --version "$PG_OPERATOR_CHART" -f deploy/operators/pg-operator.values.yaml --wait
-    helm upgrade --install pxc-operator percona/pxc-operator -n pxc-operator \
-        --version "$PXC_OPERATOR_CHART" -f deploy/operators/pxc-operator.values.yaml --wait
-    helm upgrade --install psmdb-operator percona/psmdb-operator -n psmdb-operator \
-        --version "$PSMDB_OPERATOR_CHART" -f deploy/operators/psmdb-operator.values.yaml --wait
-    helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n strimzi \
-        --version "$STRIMZI_CHART" -f deploy/operators/strimzi.values.yaml --wait
+    install_operator pg-operator percona/pg-operator pg-operator "$PG_OPERATOR_CHART" deploy/operators/pg-operator.values.yaml
+    install_operator pxc-operator percona/pxc-operator pxc-operator "$PXC_OPERATOR_CHART" deploy/operators/pxc-operator.values.yaml
+    install_operator psmdb-operator percona/psmdb-operator psmdb-operator "$PSMDB_OPERATOR_CHART" deploy/operators/psmdb-operator.values.yaml
+    install_operator strimzi strimzi/strimzi-kafka-operator strimzi "$STRIMZI_CHART" deploy/operators/strimzi.values.yaml
 }
 
 apply_databases() {

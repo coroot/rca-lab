@@ -43,6 +43,20 @@ spec:
         requests:
           cpu: 50m
           memory: 64Mi
+  # The operator requires spec.backups. This lab keeps backups entirely
+  # in-cluster (a PVC-backed pgBackRest repo, no schedules, no object
+  # storage) so it needs no cloud credentials.
+  backups:
+    pgbackrest:
+      image: docker.io/percona/percona-pgbackrest:2.58.0-1
+      repos:
+        - name: repo1
+          volume:
+            volumeClaimSpec:
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 5Gi
   users:
     - name: products
       databases:

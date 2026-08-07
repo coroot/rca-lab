@@ -1,6 +1,6 @@
 # Kafka (Strimzi, KRaft): one dual-role node pool. Bootstrap:
 # kafka-kafka-bootstrap.default:9092 (plaintext, in-cluster only).
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: dual
@@ -30,14 +30,11 @@ spec:
     -Xms: 512m
     -Xmx: 512m
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: kafka
   namespace: default
-  annotations:
-    strimzi.io/kraft: enabled
-    strimzi.io/node-pools: enabled
 spec:
   kafka:
     listeners:

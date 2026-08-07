@@ -1,0 +1,74 @@
+# Single-node sizing for kind/k3d/minikube: one replica of everything,
+# replication factor 1, Percona unsafe flags to allow sub-HA sizes.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../databases
+  - ../../kafka
+patches:
+  - target:
+      kind: PerconaPGCluster
+      name: pg
+    patch: |-
+      - op: replace
+        path: /spec/instances/0/replicas
+        value: 1
+  - target:
+      kind: PerconaXtraDBCluster
+      name: mysql
+    patch: |-
+      - op: replace
+        path: /spec/pxc/size
+        value: 1
+      - op: replace
+        path: /spec/haproxy/size
+        value: 1
+      - op: add
+        path: /spec/unsafeFlags
+        value:
+          pxcSize: true
+          proxySize: true
+  - target:
+      kind: PerconaServerMongoDB
+      name: mongodb
+    patch: |-
+      - op: replace
+        path: /spec/replsets/0/size
+        value: 1
+      - op: add
+        path: /spec/unsafeFlags
+        value:
+          replsetSize: true
+  - target:
+      kind: KafkaNodePool
+      name: dual
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Kafka
+      name: kafka
+    patch: |-
+      - op: replace
+        path: /spec/kafka/config
+        value:
+          default.replication.factor: 1
+          min.insync.replicas: 1
+          offsets.topic.replication.factor: 1
+          transaction.state.log.replication.factor: 1
+          transaction.state.log.min.isr: 1
+          auto.create.topics.enable: false
+  - target:
+      kind: KafkaTopic
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: StatefulSet
+      name: valkey
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

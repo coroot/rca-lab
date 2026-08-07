@@ -1,0 +1,46 @@
+# Template for the otel-collector-config ConfigMap. scripts/deploy.sh
+# substitutes __EXPORTERS__ and __EXPORTER_NAME__:
+#   default:            nop exporter (discard everything)
+#   OTLP_ENDPOINT set:  otlp exporter pointed at it
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: default
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+      k8sattributes:
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.node.name
+            - k8s.deployment.name
+      batch: {}
+    exporters:
+__EXPORTERS__
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [__EXPORTER_NAME__]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [__EXPORTER_NAME__]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [__EXPORTER_NAME__]

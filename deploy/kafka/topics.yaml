@@ -1,0 +1,21 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: order-events
+  namespace: default
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 6
+  replicas: 3
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: shipment-events
+  namespace: default
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 6
+  replicas: 3

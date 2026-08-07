@@ -1,0 +1,69 @@
+# MySQL (Percona XtraDB Cluster): one cluster, two databases (orders,
+# payments). Databases are created by the mysql-init Job
+# (deploy/databases/jobs/mysql-init.yaml, applied by scripts/deploy.sh after
+# the cluster is ready); users are declarative below. The operator generates
+# passwords for them in the Secret mysql-custom-user-secret (key = username);
+# system/root credentials live in the Secret mysql-secrets.
+apiVersion: pxc.percona.com/v1
+kind: PerconaXtraDBCluster
+metadata:
+  name: mysql
+  namespace: default
+spec:
+  crVersion: "1.20.0"
+  enableVolumeExpansion: true
+  pxc:
+    size: 3
+    image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    volumeSpec:
+      persistentVolumeClaim:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 8Gi
+  haproxy:
+    enabled: true
+    size: 2
+    image: docker.io/percona/haproxy:2.8.18-1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  users:
+    - name: orders
+      dbs:
+        - orders
+      hosts:
+        - "%"
+      grants:
+        - SELECT
+        - INSERT
+        - UPDATE
+        - DELETE
+        - CREATE
+        - ALTER
+        - INDEX
+        - DROP
+        - REFERENCES
+    - name: payments
+      dbs:
+        - payments
+      hosts:
+        - "%"
+      grants:
+        - SELECT
+        - INSERT
+        - UPDATE
+        - DELETE
+        - CREATE
+        - ALTER
+        - INDEX
+        - DROP
+        - REFERENCES

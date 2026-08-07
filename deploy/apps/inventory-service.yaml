@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: default
+  labels:
+    app: inventory-service
+    part-of: rca-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+        part-of: rca-lab
+    spec:
+      containers:
+        - name: inventory-service
+          image: ghcr.io/coroot/rca-lab/inventory-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: otel-env
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: inventory-service
+            # Percona PG operator-generated credentials; the service parses a
+            # single DSN URL (src/Database.php) — point it at pgBouncer.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pg-pguser-inventory
+                  key: pgbouncer-uri
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /fpm-ping
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: default
+  labels:
+    app: inventory-service
+    part-of: rca-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: inventory-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP

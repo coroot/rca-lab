@@ -1,0 +1,27 @@
+[package]
+name = "payment-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "mysql", "chrono", "rust_decimal", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1", features = ["serde", "serde-with-str"] }
+tokio = { version = "1", features = ["full"] }
+rand = "0.8"
+
+# OpenTelemetry / tracing (pinned as a matched set for otel 0.32)
+opentelemetry = "=0.32.0"
+opentelemetry_sdk = "=0.32.1"
+opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["grpc-tonic", "trace", "metrics", "logs"] }
+opentelemetry-appender-tracing = "=0.32.0"
+opentelemetry-semantic-conventions = "=0.32.1"
+opentelemetry-instrumentation-actix-web = { version = "=0.24.0", features = ["metrics"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "=0.33.0"
+tracing-actix-web = { version = "=0.7.22", features = ["opentelemetry_0_32"] }

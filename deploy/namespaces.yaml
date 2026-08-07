@@ -1,0 +1,21 @@
+# Operator namespaces. Everything lab-related (apps, databases, Kafka,
+# otel-collector, scenario operator) lives in the "default" namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pg-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pxc-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: psmdb-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strimzi

@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - otel-env.yaml
+  - api-gateway.yaml
+  - product-catalog.yaml
+  - cart-service.yaml
+  - order-service.yaml
+  - review-service.yaml
+  - payment-service.yaml
+  - inventory-service.yaml
+  - fulfillment-service.yaml
+  - recommendation-service.yaml
+  - load-generator.yaml

@@ -1,0 +1,41 @@
+# MongoDB (Percona Server for MongoDB): 3-member replica set, database
+# "reviews". The declarative user below gets a generated password in the
+# Secret mongodb-custom-user-secret (key = username). The reviews database
+# itself is created implicitly on first write.
+apiVersion: psmdb.percona.com/v1
+kind: PerconaServerMongoDB
+metadata:
+  name: mongodb
+  namespace: default
+spec:
+  crVersion: "1.23.0"
+  image: docker.io/percona/percona-server-mongodb:8.0
+  replsets:
+    - name: rs0
+      size: 3
+      configuration: |
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.5
+        net:
+          maxIncomingConnections: 500
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      volumeSpec:
+        persistentVolumeClaim:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+  users:
+    - name: reviews
+      db: reviews
+      roles:
+        - name: readWrite
+          db: reviews

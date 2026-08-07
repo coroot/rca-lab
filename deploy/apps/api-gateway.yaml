@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: default
+  labels:
+    app: api-gateway
+    part-of: rca-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        part-of: rca-lab
+    spec:
+      containers:
+        - name: api-gateway
+          image: ghcr.io/coroot/rca-lab/api-gateway:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: otel-env
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: api-gateway
+            - name: PRODUCT_CATALOG_URL
+              value: "http://product-catalog:8080"
+            - name: CART_SERVICE_URL
+              value: "http://cart-service:8080"
+            - name: ORDER_SERVICE_URL
+              value: "http://order-service:8080"
+            - name: REVIEW_SERVICE_URL
+              value: "http://review-service:8080"
+            - name: PAYMENT_SERVICE_URL
+              value: "http://payment-service:8080"
+            - name: INVENTORY_SERVICE_URL
+              value: "http://inventory-service:8080"
+            - name: RECOMMENDATION_SERVICE_ADDR
+              value: "recommendation-service:9000"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: default
+  labels:
+    app: api-gateway
+    part-of: rca-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP

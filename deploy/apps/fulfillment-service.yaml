@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fulfillment-service
+  namespace: default
+  labels:
+    app: fulfillment-service
+    part-of: rca-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fulfillment-service
+  template:
+    metadata:
+      labels:
+        app: fulfillment-service
+        part-of: rca-lab
+    spec:
+      containers:
+        - name: fulfillment-service
+          image: ghcr.io/coroot/rca-lab/fulfillment-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: otel-env
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: fulfillment-service
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka-kafka-bootstrap:9092
+            - name: INVENTORY_SERVICE_URL
+              value: http://inventory-service:8080
+            # MYSQL_PASSWORD must be defined before DATABASE_URL for $(VAR)
+            # substitution to work.
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-custom-user-secret
+                  key: orders
+            - name: DATABASE_URL
+              value: "orders:$(MYSQL_PASSWORD)@tcp(mysql-haproxy:3306)/orders?parseTime=true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fulfillment-service
+  namespace: default
+  labels:
+    app: fulfillment-service
+    part-of: rca-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: fulfillment-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP

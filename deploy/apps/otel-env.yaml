@@ -1,0 +1,19 @@
+# Shared OpenTelemetry configuration for all application services.
+# Each Deployment imports this via envFrom and adds its own OTEL_SERVICE_NAME.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-env
+  namespace: default
+  labels:
+    part-of: rca-lab
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_TRACES_EXPORTER: "otlp"
+  OTEL_METRICS_EXPORTER: "otlp"
+  OTEL_LOGS_EXPORTER: "otlp"
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=rca-lab"
+  OTEL_TRACES_SAMPLER: "parentbased_always_on"
+  OTEL_METRIC_EXPORT_INTERVAL: "15000"
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"

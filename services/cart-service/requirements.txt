@@ -1,0 +1,7 @@
+flask==3.1.0
+redis==5.0.1
+gunicorn==21.2.0
+requests==2.31.0
+orjson==3.10.15
+opentelemetry-distro==0.50b0
+opentelemetry-exporter-otlp==1.29.0

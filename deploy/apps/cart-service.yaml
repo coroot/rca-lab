@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart-service
+  namespace: default
+  labels:
+    app: cart-service
+    part-of: rca-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart-service
+  template:
+    metadata:
+      labels:
+        app: cart-service
+        part-of: rca-lab
+    spec:
+      containers:
+        - name: cart-service
+          image: ghcr.io/coroot/rca-lab/cart-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: otel-env
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: cart-service
+            # "valkey" Service pins to the primary pod (valkey-0).
+            - name: REDIS_URL
+              value: "redis://valkey:6379/0"
+            - name: ORDER_SERVICE_URL
+              value: "http://order-service:8080"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart-service
+  namespace: default
+  labels:
+    app: cart-service
+    part-of: rca-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: cart-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP

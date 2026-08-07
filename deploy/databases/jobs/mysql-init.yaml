@@ -1,0 +1,41 @@
+# Creates the orders/payments databases (spec.users grants access but does
+# not create databases). Applied by scripts/deploy.sh after the PXC cluster
+# is ready; deleted+recreated on each deploy (Jobs are immutable), idempotent
+# via IF NOT EXISTS. Root password comes from the operator-generated Secret.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-init
+  namespace: default
+  labels:
+    app: mysql-init
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: mysql-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mysql-init
+          image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
+          command:
+            - sh
+            - -c
+            - |
+              mysql -h mysql-haproxy -uroot -p"$MYSQL_ROOT_PASSWORD" <<'SQL'
+              CREATE DATABASE IF NOT EXISTS orders;
+              CREATE DATABASE IF NOT EXISTS payments;
+              SQL
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secrets
+                  key: root
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi

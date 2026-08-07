@@ -1,0 +1,9 @@
+# Strimzi Kafka operator — watches the lab namespace only.
+watchNamespaces:
+  - default
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi

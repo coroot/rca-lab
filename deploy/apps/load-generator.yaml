@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: default
+  labels:
+    app: load-generator
+    part-of: rca-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+        part-of: rca-lab
+    spec:
+      containers:
+        - name: load-generator
+          image: ghcr.io/coroot/rca-lab/load-generator:1.0.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: otel-env
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: load-generator
+            - name: GATEWAY_URL
+              value: "http://api-gateway:8080"
+            - name: RPS_PER_SERVICE
+              value: "20"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

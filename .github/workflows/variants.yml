@@ -1,0 +1,88 @@
+# Builds bad-deploy image variants: real code regressions compiled into images
+# with plausible next-semver tags (declared in each variant.yaml). A bad deploy
+# in the lab is then a genuine image bump + rollout.
+name: variants
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/*/variants/**"
+      - "versions.yaml"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: service name (empty = all)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.variants.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: variants
+        run: |
+          matrix=$(python3 - "${{ inputs.service }}" <<'EOF'
+          import glob, json, os, sys, yaml
+          only = sys.argv[1] if len(sys.argv) > 1 else ""
+          include = []
+          for f in sorted(glob.glob("services/*/variants/*/variant.yaml")):
+              service = f.split("/")[1]
+              if only and service != only:
+                  continue
+              v = yaml.safe_load(open(f))
+              include.append({
+                  "service": service,
+                  "variant": v["name"],
+                  "tag": str(v["tag"]),
+                  "context": os.path.join("services", service),
+              })
+          print(json.dumps({"include": include}))
+          EOF
+          )
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "variants: $matrix"
+
+  build:
+    needs: detect
+    if: ${{ fromJson(needs.detect.outputs.matrix).include[0] }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          build-args: |
+            VARIANT=${{ matrix.variant }}
+          tags: ghcr.io/coroot/rca-lab/${{ matrix.service }}:${{ matrix.tag }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.variant }},mode=max
+
+  registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify variants/registry.yaml is up to date
+        run: |
+          python3 scripts/gen-variant-registry.py
+          git diff --exit-code variants/registry.yaml \
+            || { echo "variants/registry.yaml is stale; run: python3 scripts/gen-variant-registry.py"; exit 1; }

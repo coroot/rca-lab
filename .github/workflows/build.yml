@@ -1,0 +1,98 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      all:
+        description: build all images regardless of changes
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.changes.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changes
+        name: Compute changed image directories
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.all }}" = "true" ]; then
+            dirs=$(ls -d services/*/ operator/ | sed 's:/$::')
+          else
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              base="${{ github.event.pull_request.base.sha }}"
+            else
+              base="${{ github.event.before }}"
+              # first push / force push: build everything
+              if [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base" 2>/dev/null; then
+                base=""
+              fi
+            fi
+            if [ -z "$base" ]; then
+              dirs=$(ls -d services/*/ operator/ | sed 's:/$::')
+            else
+              dirs=$(git diff --name-only "$base" "${{ github.sha }}" \
+                | grep -E '^(services/[^/]+/|operator/)' \
+                | grep -v '/variants/' \
+                | sed -E 's:^(services/[^/]+|operator)/.*:\1:' | sort -u)
+            fi
+          fi
+          matrix=$(python3 - "$dirs" <<'EOF'
+          import json, os, sys, yaml
+          dirs = [d for d in sys.argv[1].split() if os.path.isfile(os.path.join(d, "Dockerfile"))]
+          versions = yaml.safe_load(open("versions.yaml"))["services"]
+          include = []
+          for d in dirs:
+              name = "operator" if d == "operator" else os.path.basename(d)
+              include.append({"name": name, "context": d, "version": str(versions[name])})
+          print(json.dumps({"include": include}))
+          EOF
+          )
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "building: $matrix"
+
+  build:
+    needs: detect
+    if: ${{ fromJson(needs.detect.outputs.matrix).include[0] }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          tags: ghcr.io/coroot/rca-lab/${{ matrix.name }}:${{ matrix.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

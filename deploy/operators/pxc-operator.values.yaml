@@ -1,0 +1,9 @@
+# Percona Operator for MySQL (PXC) — watches the lab namespace only.
+watchNamespace: default
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 500Mi

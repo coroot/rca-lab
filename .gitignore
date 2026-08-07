@@ -1,0 +1,15 @@
+# build artifacts
+services/*/target/
+services/*/node_modules/
+services/*/vendor/
+services/*/__pycache__/
+**/__pycache__/
+*.pyc
+operator/bin/
+operator/web/dist/
+operator/web/node_modules/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

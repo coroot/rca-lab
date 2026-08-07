@@ -20,7 +20,7 @@ spec:
       containers:
         - name: load-generator
           image: ghcr.io/coroot/rca-lab/load-generator:1.0.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: otel-env

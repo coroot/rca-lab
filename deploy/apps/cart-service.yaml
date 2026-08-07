@@ -20,7 +20,7 @@ spec:
       containers:
         - name: cart-service
           image: ghcr.io/coroot/rca-lab/cart-service:1.0.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:

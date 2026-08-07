@@ -9,7 +9,8 @@ synthetic faults toggled by feature flags. rca-lab takes the opposite approach:
 - **A real polyglot microservice stack** (Python, Go, Java, Node.js, Rust, PHP)
   behind an API gateway, with continuous generated load.
 - **Real databases under production-grade operators**: PostgreSQL, MySQL and
-  MongoDB via Percona operators, replicated Valkey, Kafka via Strimzi — with
+  MongoDB via Percona operators, a Valkey Cluster via the valkey-operator,
+  Kafka via Strimzi — with
   seeded data volumes.
 - **Real failure mechanisms only.** No chaos flags inside the apps. A GC
   pressure incident is a genuine allocation regression shipped as a new image
@@ -116,7 +117,7 @@ flowchart LR
 
     PC --> PGP[(products)]:::db
     INV --> PGI[(inventory)]:::db
-    CART --> VK[(Valkey)]:::db
+    CART --> VK[(Valkey Cluster)]:::db
     ORD --> MYO[(orders)]:::db
     PAY --> MYP[(payments)]:::db
     REV --> MG[(reviews)]:::db

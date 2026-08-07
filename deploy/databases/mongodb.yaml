@@ -9,7 +9,11 @@ metadata:
   namespace: default
 spec:
   crVersion: "1.23.0"
-  image: docker.io/percona/percona-server-mongodb:8.0
+  # MongoDB 7.0, not 8.x: the 8.x line refuses to start on Linux kernel
+  # 6.19+ (MongoDB SERVER-121912), which breaks on modern host kernels
+  # such as Ubuntu 26.04's 7.0. 7.0 is a supported LTS and has no such
+  # check, so it runs on both old and new kernels.
+  image: docker.io/percona/percona-server-mongodb:7.0.39
   replsets:
     - name: rs0
       size: 3

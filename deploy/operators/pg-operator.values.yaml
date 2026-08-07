@@ -1,5 +1,10 @@
-# Percona Operator for PostgreSQL — watches the lab namespace only.
-watchNamespace: default
+# Percona Operator for PostgreSQL, cluster-wide. Unlike the PXC and PSMDB
+# operators, the PG operator reads its OWN pod (in this namespace) during
+# reconciliation, which fails if its cache is scoped to a single, different
+# watch namespace ("unknown namespace for the cache"). Cluster-wide mode
+# gives it a cluster-scoped cache so it can read both its own pod and the
+# PerconaPGCluster in the default namespace.
+watchAllNamespaces: true
 resources:
   requests:
     cpu: 50m

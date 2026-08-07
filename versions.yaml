@@ -29,6 +29,6 @@ images:
   pgbouncer: docker.io/percona/percona-pgbouncer:1.25.1-1
   pxc: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
   haproxy: docker.io/percona/haproxy:2.8.18-1
-  psmdb: docker.io/percona/percona-server-mongodb:8.0
+  psmdb: docker.io/percona/percona-server-mongodb:7.0.39  # 8.x refuses kernel 6.19+ (SERVER-121912)
   valkey: docker.io/valkey/valkey:9.1.1-alpine
   otel-collector: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.158.0

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Data seeder for rca-lab databases.
-Seeds ~10GB of data into each database.
+Seeds each database with lab-appropriate data (size-based; MySQL row-capped).
 """
 
 import os
@@ -37,6 +37,14 @@ VALKEY_URL = os.getenv("VALKEY_URL", "redis://valkey-valkey:6379")
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5000"))
 TARGET_SIZE_GB = float(os.getenv("TARGET_SIZE_GB", "10"))
+# MySQL runs on PXC (Galera): synchronous replication caps insert throughput at
+# a few hundred rows/sec regardless of batching, so seeding size-based millions
+# of rows is impractical. Cap the row counts to a lab-appropriate size that
+# still makes the analytics-query scenario non-trivial. The fast databases
+# (PostgreSQL, MongoDB, Valkey) keep their size-based targets.
+MYSQL_MAX_ORDERS = int(os.getenv("MYSQL_MAX_ORDERS", "30000"))
+MYSQL_MAX_PAYMENTS = int(os.getenv("MYSQL_MAX_PAYMENTS", "100000"))
+MYSQL_BATCH = int(os.getenv("MYSQL_BATCH", "1000"))
 
 # Faker calls (text/company/user_agent/...) cost ~ms each and, under the GIL,
 # serialize across the seeder threads — they, not the databases, are the
@@ -288,7 +296,7 @@ def seed_mysql_payments():
     log.info(f"MySQL payments: {existing} existing rows")
 
     # Each row ~500 bytes (UUID + varchars + decimal + json + timestamps)
-    target_rows = int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 512)
+    target_rows = min(int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 512), MYSQL_MAX_PAYMENTS)
     remaining = target_rows - existing
 
     if remaining <= 0:
@@ -303,7 +311,7 @@ def seed_mysql_payments():
     currencies = ["USD", "EUR", "GBP", "JPY", "CAD"]
 
     while inserted < remaining:
-        batch = min(BATCH_SIZE, remaining - inserted)
+        batch = min(MYSQL_BATCH, remaining - inserted)
         values = []
         for _ in range(batch):
             uid = str(uuid.uuid4())
@@ -395,7 +403,7 @@ def seed_mysql_orders():
     existing = max_id  # ids are assigned explicitly below, so max ~= count
 
     # Each order ~500 bytes + ~3 items at ~200 bytes each = ~1.1KB per order
-    target_rows = int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 1100)
+    target_rows = min(int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 1100), MYSQL_MAX_ORDERS)
     remaining = target_rows - existing
 
     if remaining <= 0:
@@ -409,7 +417,7 @@ def seed_mysql_orders():
     next_id = max_id + 1
 
     while inserted < remaining:
-        batch = min(BATCH_SIZE, remaining - inserted)
+        batch = min(MYSQL_BATCH, remaining - inserted)
 
         # Assign order ids explicitly: PXC (Galera) auto_increment steps by the
         # cluster size, so arithmetic on LAST_INSERT_ID() would produce wrong
@@ -433,8 +441,8 @@ def seed_mysql_orders():
 
         mysql_multi_insert(cur, "orders", "id,user_id,status,total,shipping_address,payment_id", order_values)
         # Chunk order_items to keep the statement size sane.
-        for k in range(0, len(item_values), BATCH_SIZE):
-            mysql_multi_insert(cur, "order_items", "order_id,product_id,name,quantity,price", item_values[k:k + BATCH_SIZE])
+        for k in range(0, len(item_values), MYSQL_BATCH):
+            mysql_multi_insert(cur, "order_items", "order_id,product_id,name,quantity,price", item_values[k:k + MYSQL_BATCH])
         conn.commit()
 
         next_id += batch

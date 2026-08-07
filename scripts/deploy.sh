@@ -59,9 +59,11 @@ preflight() {
 install_operator() {
     local name=$1 chart=$2 ns=$3 version=$4 values=$5
     local status
-    # helm status exits non-zero when the release does not exist; its JSON
-    # .info.status is the release state. Works on both Helm v3 and v4.
-    status="$(helm status "$name" -n "$ns" -o json 2>/dev/null | grep -o '"status":"[a-z-]*"' | head -1 | cut -d'"' -f4)"
+    # helm status exits non-zero when the release does not exist (fresh
+    # cluster); the trailing `|| true` keeps that from aborting under
+    # `set -e`/`pipefail`. Its JSON .info.status is the release state. Works on
+    # both Helm v3 and v4.
+    status="$(helm status "$name" -n "$ns" -o json 2>/dev/null | grep -o '"status":"[a-z-]*"' | head -1 | cut -d'"' -f4)" || true
     if [ "$status" = "deployed" ]; then
         info "operator $name already deployed (skipping; run 'make clean' to change versions)"
         return

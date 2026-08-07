@@ -94,14 +94,16 @@ apply_databases() {
     local base=deploy/overlays/default
     [ -n "$SINGLE_NODE" ] && base=deploy/overlays/single-node
     if [ -n "$STORAGE_CLASS" ]; then
+        # Temp overlay lives inside deploy/overlays so it can reference the base
+        # by a relative path (kustomize 5 rejects absolute paths in resources).
         local tmp
-        tmp="$(mktemp -d)"
+        tmp="$(mktemp -d deploy/overlays/.sc.XXXXXX)"
         trap 'rm -rf "$tmp"' RETURN
         cat > "$tmp/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - $(pwd)/$base
+  - ../$(basename "$base")
 patches:
   - target:
       kind: PerconaPGCluster
@@ -211,35 +213,36 @@ apply_apps() {
     kubectl wait --for=condition=Available deployment -l part-of=rca-lab -n default --timeout=10m
 }
 
-# Emits kustomize `images:` entries pinning every ghcr.io/coroot/rca-lab/<name>
-# image to its versions.yaml tag. Bumping a service's version there (when you
-# change its code) is what makes `kubectl apply` see a new image and roll it
-# out; untouched services keep their tag and are not restarted.
-image_tag_overrides() {
-    awk '
+# Prints a single service's tag from versions.yaml.
+service_tag() {
+    awk -v s="$1" '
         /^services:/ {inb=1; next}
         inb && /^[^[:space:]]/ {inb=0}
-        inb && /^[[:space:]]+[a-z0-9-]+:/ {
-            gsub(/[[:space:]]/, "");
-            split($0, kv, ":");
-            printf "  - name: ghcr.io/coroot/rca-lab/%s\n    newTag: \"%s\"\n", kv[1], kv[2];
-        }
+        inb && /^[[:space:]]+[a-z0-9-]+:/ { sub(/#.*/, ""); gsub(/[[:space:]]/, ""); split($0, kv, ":"); if (kv[1]==s) print kv[2]}
     ' versions.yaml
 }
 
+# Rewrites every ghcr.io/coroot/rca-lab/<svc> image tag on stdin to that
+# service's versions.yaml tag. Bumping a service's version there (when you
+# change its code) is what makes `kubectl apply` see a new image and roll it
+# out; untouched services keep their tag and are not restarted.
+retag_lab_images() {
+    local sed_args=() name tag
+    while read -r name tag; do
+        sed_args+=(-e "s#ghcr.io/coroot/rca-lab/${name}:[A-Za-z0-9._-]*#ghcr.io/coroot/rca-lab/${name}:${tag}#g")
+    done < <(awk '
+        /^services:/ {inb=1; next}
+        inb && /^[^[:space:]]/ {inb=0}
+        inb && /^[[:space:]]+[a-z0-9-]+:/ { sub(/#.*/, ""); gsub(/[[:space:]]/, ""); split($0, kv, ":"); print kv[1], kv[2]}
+    ' versions.yaml)
+    sed "${sed_args[@]}"
+}
+
+# Renders a kustomize base and applies it with image tags resolved from
+# versions.yaml (avoids a temp overlay, which kustomize 5 rejects for
+# absolute paths).
 apply_kustomize_with_image_tags() {
-    local base=$1 tmp
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
-    {
-        echo "apiVersion: kustomize.config.k8s.io/v1beta1"
-        echo "kind: Kustomization"
-        echo "resources:"
-        echo "  - $(pwd)/$base"
-        echo "images:"
-        image_tag_overrides
-    } > "$tmp/kustomization.yaml"
-    kubectl apply -k "$tmp"
+    kubectl kustomize "$1" | retag_lab_images | kubectl apply -f -
 }
 
 apply_scenarios() {
@@ -264,7 +267,7 @@ seed() {
     info "Seeding data (${SEED_SIZE_GB} GB total; idempotent)"
     kubectl delete job data-seeder -n default --ignore-not-found >/dev/null
     local seeder_tag
-    seeder_tag="$(image_tag_overrides | awk '/data-seeder/{getline; gsub(/[[:space:]"]/,""); sub(/newTag:/,""); print}')"
+    seeder_tag="$(service_tag data-seeder)"
     sed -e "s/__SEED_SIZE_GB__/$SEED_SIZE_GB/" \
         -e "s#\(data-seeder\):[A-Za-z0-9._-]*#\1:${seeder_tag}#" \
         deploy/seed/seed-job.yaml | kubectl apply -f -

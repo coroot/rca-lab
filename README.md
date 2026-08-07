@@ -79,6 +79,23 @@ fixed duration — see `scenarios/`.
 > **Never install rca-lab on a shared or production cluster.** The scenario
 > operator deliberately has the power to degrade workloads in its namespace.
 
+## Scenario library
+
+Every scenario uses a genuine real-world mechanism — never a synthetic fault
+flag inside the app — and reverts durably. Each carries an `expectedSymptoms`
+list that doubles as documentation and a grading rubric for RCA tools.
+
+| Scenario | Category | Mechanism | What an RCA tool should find |
+|----------|----------|-----------|------------------------------|
+| `pg-analytics-queries` | database | An `analytics-reporting` workload runs heavy multi-join/aggregation queries (full scans of the ~10 GB products table) against the production PostgreSQL, through the same pgBouncer pool as the apps. | Elevated `product-catalog`/`inventory-service` latency; PostgreSQL CPU/IO saturation; new full-scan query fingerprints in `pg_stat_statements` attributable to the `analytics-reporting` workload. |
+| `mysql-analytics-queries` | database | The same `analytics-reporting` actor runs large join/aggregation queries (filesort, temp tables) against the production MySQL `orders` database via HAProxy. | Elevated `order-service`/checkout latency and errors; PXC CPU/IO saturation; heavy statements in the slow query log attributable to the workload. |
+| `order-service-gc-regression` | deploy | A genuine bad deploy: `order-service` rolls out `1.1.0`, a real code regression that deep-copies every order read into an ineffective cache. GC pressure builds; revert rolls back to the known-good image. | p99 rises after the rollout while p50 stays flat; JVM allocation rate and GC time climb; heap sawtooth trends toward the limit; onset correlates exactly with the deployment event. |
+| `traffic-spike` | infra | The `load-generator` Deployment is scaled to 5 replicas — real extra traffic across the whole stack. | Uniform RPS increase everywhere; saturation (latency/errors) appears only at the weakest component, testing cause-vs-consequence reasoning. |
+
+More scenarios (bad migrations, connection-pool leaks, Kafka consumer lag,
+network partitions, cache eviction pressure, and others) are on the roadmap;
+each will follow the same real-mechanism, durable-revert rule.
+
 ## Architecture
 
 ```

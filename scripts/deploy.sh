@@ -25,6 +25,7 @@ PG_OPERATOR_CHART=3.0.0
 PXC_OPERATOR_CHART=1.20.0
 PSMDB_OPERATOR_CHART=1.23.0
 STRIMZI_CHART=1.1.0
+VALKEY_OPERATOR_CHART=0.4.1
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*"; }
@@ -77,11 +78,13 @@ install_operators() {
     kubectl apply -f deploy/namespaces.yaml
     helm repo add percona https://percona.github.io/percona-helm-charts/ >/dev/null
     helm repo add strimzi https://strimzi.io/charts/ >/dev/null
-    helm repo update percona strimzi >/dev/null
+    helm repo add valkey https://valkey.io/valkey-helm >/dev/null
+    helm repo update percona strimzi valkey >/dev/null
     install_operator pg-operator percona/pg-operator pg-operator "$PG_OPERATOR_CHART" deploy/operators/pg-operator.values.yaml
     install_operator pxc-operator percona/pxc-operator pxc-operator "$PXC_OPERATOR_CHART" deploy/operators/pxc-operator.values.yaml
     install_operator psmdb-operator percona/psmdb-operator psmdb-operator "$PSMDB_OPERATOR_CHART" deploy/operators/psmdb-operator.values.yaml
     install_operator strimzi strimzi/strimzi-kafka-operator strimzi "$STRIMZI_CHART" deploy/operators/strimzi.values.yaml
+    install_operator valkey-operator valkey/valkey-operator valkey-operator "$VALKEY_OPERATOR_CHART" deploy/operators/valkey-operator.values.yaml
 }
 
 apply_databases() {
@@ -127,11 +130,11 @@ patches:
         path: /spec/storage/volumes/0/class
         value: $STORAGE_CLASS
   - target:
-      kind: StatefulSet
+      kind: ValkeyCluster
       name: valkey
     patch: |-
       - op: add
-        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        path: /spec/persistence/storageClassName
         value: $STORAGE_CLASS
 EOF
         kubectl apply -k "$tmp"
@@ -146,12 +149,12 @@ wait_databases() {
     kubectl wait --for=jsonpath='{.status.state}'=ready perconaxtradbcluster/mysql -n default --timeout=15m &
     kubectl wait --for=jsonpath='{.status.state}'=ready perconaservermongodb/mongodb -n default --timeout=15m &
     kubectl wait --for=condition=Ready kafka/kafka -n default --timeout=15m &
+    kubectl wait --for=jsonpath='{.status.state}'=Ready valkeycluster/valkey -n default --timeout=15m &
     local pid rc=0
     for pid in $(jobs -p); do
         wait "$pid" || rc=1
     done
     [ "$rc" = 0 ] || die "a database/kafka cluster did not become ready; check 'make status'"
-    kubectl rollout status statefulset/valkey -n default --timeout=5m
 }
 
 mysql_init() {

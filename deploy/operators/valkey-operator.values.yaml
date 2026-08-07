@@ -1,0 +1,10 @@
+# Valkey Operator (valkey-io/valkey-operator). Cluster-wide by default
+# (manager.watchNamespaces empty), so it can reconcile the ValkeyCluster in
+# the default namespace without namespace-cache issues.
+replicaCount: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi

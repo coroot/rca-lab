@@ -1,88 +1,29 @@
-# Valkey, replicated: valkey-0 is the primary, valkey-1 replicates from it.
-# The "valkey" Service pins to the primary pod (writes + reads); the headless
-# service provides stable per-pod DNS for replication.
-apiVersion: v1
-kind: Service
-metadata:
-  name: valkey-headless
-  namespace: default
-  labels:
-    app: valkey
-spec:
-  clusterIP: None
-  selector:
-    app: valkey
-  ports:
-    - name: valkey
-      port: 6379
----
-apiVersion: v1
-kind: Service
+# Valkey in Cluster mode, managed by the valkey-io/valkey-operator.
+# 3 shards x 1 replica (6 nodes): a real sharded cluster with failover, which
+# is what the cart-service and seeder connect to as a cluster-aware client.
+# Clients reach it via the operator-created headless Service "valkey-valkey"
+# (pattern: valkey-<clusterName>) on port 6379. No auth (no users defined).
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
 metadata:
   name: valkey
   namespace: default
-  labels:
-    app: valkey
 spec:
-  selector:
-    app: valkey
-    statefulset.kubernetes.io/pod-name: valkey-0
-  ports:
-    - name: valkey
-      port: 6379
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: valkey
-  namespace: default
-  labels:
-    app: valkey
-spec:
-  serviceName: valkey-headless
-  replicas: 2
-  selector:
-    matchLabels:
-      app: valkey
-  template:
-    metadata:
-      labels:
-        app: valkey
-    spec:
-      containers:
-        - name: valkey
-          image: docker.io/valkey/valkey:9.1.1-alpine
-          command:
-            - sh
-            - -c
-            - |
-              if [ "$(hostname)" = "valkey-0" ]; then
-                exec valkey-server --appendonly yes
-              else
-                exec valkey-server --appendonly yes --replicaof valkey-0.valkey-headless 6379
-              fi
-          ports:
-            - name: valkey
-              containerPort: 6379
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              memory: 512Mi
-          readinessProbe:
-            exec:
-              command: ["valkey-cli", "ping"]
-            initialDelaySeconds: 2
-            periodSeconds: 5
-          volumeMounts:
-            - name: data
-              mountPath: /data
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 2Gi
+  shards: 3
+  replicas: 1
+  # Cart/cache workload: evict least-recently-used keys under memory pressure.
+  config:
+    maxmemory-policy: allkeys-lru
+  # Prometheus redis_exporter sidecar is not used here (telemetry is OTLP-based
+  # and Coroot reads Valkey directly); disable it to keep pods lean.
+  exporter:
+    enabled: false
+  persistence:
+    size: 2Gi
+    reclaimPolicy: Delete
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi

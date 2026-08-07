@@ -45,13 +45,18 @@ info "Deleting database and Kafka clusters (finalizers run while operators are s
 kubectl delete -k deploy/overlays/default --ignore-not-found --timeout=15m || true
 kubectl wait --for=delete perconapgcluster/pg perconaxtradbcluster/mysql perconaservermongodb/mongodb kafka/kafka -n default --timeout=15m 2>/dev/null || true
 
+# Sweep leftover Job pods the operators don't always GC (e.g. completed
+# pgBackRest backup pods, mysql-init/seed jobs).
+info "Removing leftover job pods"
+kubectl delete pods -n default --field-selector=status.phase=Succeeded --ignore-not-found >/dev/null 2>&1 || true
+
 if [ -z "$KEEP_DATA" ]; then
     info "Deleting PVCs"
-    kubectl delete pvc -n default -l app=valkey --ignore-not-found
     kubectl delete pvc -n default -l postgres-operator.crunchydata.com/cluster=pg --ignore-not-found
     kubectl delete pvc -n default -l app.kubernetes.io/instance=mysql --ignore-not-found
     kubectl delete pvc -n default -l app.kubernetes.io/instance=mongodb --ignore-not-found
     kubectl delete pvc -n default -l strimzi.io/cluster=kafka --ignore-not-found
+    kubectl delete pvc -n default -l app.kubernetes.io/managed-by=valkey-operator --ignore-not-found
 fi
 
 info "Uninstalling operators"
@@ -59,6 +64,7 @@ helm uninstall pg-operator -n pg-operator 2>/dev/null || true
 helm uninstall pxc-operator -n pxc-operator 2>/dev/null || true
 helm uninstall psmdb-operator -n psmdb-operator 2>/dev/null || true
 helm uninstall strimzi -n strimzi 2>/dev/null || true
+helm uninstall valkey-operator -n valkey-operator 2>/dev/null || true
 kubectl delete -f deploy/namespaces.yaml --ignore-not-found
 
 info "Done"

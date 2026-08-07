@@ -66,9 +66,9 @@ patches:
         path: /spec/replicas
         value: 1
   - target:
-      kind: StatefulSet
+      kind: ValkeyCluster
       name: valkey
     patch: |-
       - op: replace
         path: /spec/replicas
-        value: 1
+        value: 0

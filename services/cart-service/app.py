@@ -4,8 +4,8 @@ import time
 import logging
 
 import orjson
-import redis
 import requests
+from redis.cluster import RedisCluster
 from flask import Flask, request, Response
 
 app = Flask(__name__)
@@ -15,11 +15,14 @@ logging.basicConfig(level=logging.INFO)
 def json_response(data, status=200):
     return Response(orjson.dumps(data), status=status, content_type="application/json")
 
-REDIS_URL = os.getenv("REDIS_URL") or os.getenv("VALKEY_URL") or "redis://valkey:6379/0"
+# Valkey runs in Cluster mode (valkey-io/valkey-operator), so we use a
+# cluster-aware client. The URL points at the operator's headless Service,
+# which resolves to all cluster nodes for topology discovery. Cluster mode
+# has no database index, so the URL carries no "/0".
+REDIS_URL = os.getenv("REDIS_URL") or os.getenv("VALKEY_URL") or "redis://valkey-valkey:6379"
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://order-service:8080")
 
-pool = redis.ConnectionPool.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=3, max_connections=32)
-r = redis.Redis(connection_pool=pool)
+r = RedisCluster.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=3)
 
 
 @app.route("/health")

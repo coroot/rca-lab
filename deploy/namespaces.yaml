@@ -19,3 +19,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: strimzi
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: valkey-operator

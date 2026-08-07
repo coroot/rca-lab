@@ -23,6 +23,7 @@ charts:
   pxc-operator: 1.20.0      # Percona Operator for MySQL (PXC)
   psmdb-operator: 1.23.0    # Percona Operator for MongoDB
   strimzi-kafka-operator: 1.1.0
+  valkey-operator: 0.4.1    # valkey-io/valkey-operator (Valkey Cluster)
 
 images:
   postgres: docker.io/percona/percona-distribution-postgresql:18.3-2
@@ -30,5 +31,5 @@ images:
   pxc: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
   haproxy: docker.io/percona/haproxy:2.8.18-1
   psmdb: docker.io/percona/percona-server-mongodb:7.0.39  # 8.x refuses kernel 6.19+ (SERVER-121912)
-  valkey: docker.io/valkey/valkey:9.1.1-alpine
+  # valkey server image is managed by the valkey-operator (ValkeyCluster).
   otel-collector: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.158.0

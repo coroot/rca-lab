@@ -98,21 +98,69 @@ each will follow the same real-mechanism, durable-revert rule.
 
 ## Architecture
 
-```
-load-generator → api-gateway ─┬→ product-catalog ─→ PostgreSQL (products) ─┐
-                              │        └─→ recommendation-service (gRPC)   │ Percona PG
-                              ├→ inventory-service → PostgreSQL (inventory)┘
-                              ├→ cart-service ─→ Valkey (replicated)
-                              │        └─→ order-service ─→ MySQL (orders) ─┐
-                              ├→ order-service ─→ payment-service           │ Percona PXC
-                              │        │              └→ MySQL (payments) ──┘
-                              │        └─⇢ Kafka (order-events) ⇢ fulfillment-service
-                              └→ review-service ─→ MongoDB (reviews, PSMDB)
+Edges: **solid** = HTTP, **dotted** = gRPC, **thick** = Kafka event.
+
+```mermaid
+flowchart LR
+    LG([load-generator]):::gen --> GW[api-gateway]:::gw
+
+    GW --> PC[product-catalog]
+    GW --> CART[cart-service]
+    GW --> ORD[order-service]
+    GW --> REV[review-service]
+    GW --> INV[inventory-service]
+    GW -. gRPC .-> REC[recommendation-service]
+    PC -. gRPC .-> REC
+    CART -- checkout --> ORD
+    ORD -- sync --> PAY[payment-service]
+
+    PC --> PGP[(products)]:::db
+    INV --> PGI[(inventory)]:::db
+    CART --> VK[(Valkey)]:::db
+    ORD --> MYO[(orders)]:::db
+    PAY --> MYP[(payments)]:::db
+    REV --> MG[(reviews)]:::db
+
+    ORD == order-events ==> KAFKA{{Kafka}}:::kafka
+    KAFKA ==> FUL[fulfillment-service]
+    FUL -- reserve --> INV
+    FUL --> MYO
+    FUL == shipment-events ==> KAFKA
+    KAFKA ==> ORD
+
+    subgraph PGsub [Percona PostgreSQL]
+        PGP
+        PGI
+    end
+    subgraph PXCsub [Percona XtraDB Cluster]
+        MYO
+        MYP
+    end
+    subgraph PSMDBsub [Percona Server for MongoDB]
+        MG
+    end
+
+    classDef gen fill:#dbeafe,stroke:#2563eb,color:#0b213f
+    classDef gw fill:#ede9fe,stroke:#7c3aed,color:#241046
+    classDef db fill:#dcfce7,stroke:#16a34a,color:#052e16
+    classDef kafka fill:#fef3c7,stroke:#d97706,color:#3a2606
 ```
 
-All services export OTLP (traces, metrics, logs) to `otel-collector` in the
-`default` namespace. Operators live in their own namespaces (`pg-operator`,
-`pxc-operator`, `psmdb-operator`, `strimzi`).
+Every service exports OTLP — traces, SDK metrics, and logs — to a bundled
+`otel-collector` that **discards data by default**; set `OTLP_ENDPOINT` to
+forward it to any backend (Coroot, Grafana, etc.). Logs also go to stdout, so
+`kubectl logs` still works.
+
+```mermaid
+flowchart LR
+    SVCS[all services<br/>traces · metrics · logs] -- OTLP --> COL[otel-collector]
+    COL -- default --> NULL[discard]
+    COL -. OTLP_ENDPOINT .-> BACKEND[(your OTLP backend)]
+```
+
+Everything lab-related runs in the `default` namespace; the database and Kafka
+operators live in their own (`pg-operator`, `pxc-operator`, `psmdb-operator`,
+`strimzi`).
 
 ## Repository layout
 

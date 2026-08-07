@@ -38,21 +38,36 @@ VALKEY_URL = os.getenv("VALKEY_URL", "redis://valkey-valkey:6379")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5000"))
 TARGET_SIZE_GB = float(os.getenv("TARGET_SIZE_GB", "10"))
 
+# Faker calls (text/company/user_agent/...) cost ~ms each and, under the GIL,
+# serialize across the seeder threads — they, not the databases, are the
+# throughput bottleneck. Precompute pools once and sample from them; the data
+# is a little less unique, which is irrelevant for a lab but ~50x faster.
+log.info("Precomputing fake-data pools...")
+POOL_TEXT = [fake.text(max_nb_chars=random.randint(500, 2000)) for _ in range(2000)]
+POOL_TEXT_SHORT = [fake.text(max_nb_chars=500) for _ in range(1000)]
+POOL_COMPANY = [fake.company() for _ in range(1000)]
+POOL_UA = [fake.user_agent() for _ in range(500)]
+POOL_IP = [fake.ipv4() for _ in range(2000)]
+POOL_WORD = [fake.word() for _ in range(1000)]
+POOL_COLOR = [fake.color_name() for _ in range(100)]
+POOL_SENTENCE = [fake.sentence(nb_words=random.randint(3, 10)) for _ in range(2000)]
+_rc = random.choice
+
 
 def generate_large_text(min_len=500, max_len=2000):
-    return fake.text(max_nb_chars=random.randint(min_len, max_len))
+    return _rc(POOL_TEXT)
 
 
 def generate_metadata():
     return json.dumps({
         "weight": round(random.uniform(0.1, 50.0), 2),
         "dimensions": f"{random.randint(1,100)}x{random.randint(1,100)}x{random.randint(1,100)}",
-        "color": fake.color_name(),
+        "color": _rc(POOL_COLOR),
         "material": random.choice(["plastic", "metal", "wood", "fabric", "glass", "ceramic", "leather"]),
-        "brand": fake.company(),
+        "brand": _rc(POOL_COMPANY),
         "warranty_months": random.choice([0, 6, 12, 24, 36]),
-        "tags": [fake.word() for _ in range(random.randint(2, 8))],
-        "specifications": {fake.word(): fake.word() for _ in range(random.randint(3, 10))},
+        "tags": [_rc(POOL_WORD) for _ in range(random.randint(2, 8))],
+        "specifications": {_rc(POOL_WORD): _rc(POOL_WORD) for _ in range(random.randint(3, 10))},
     })
 
 
@@ -114,7 +129,7 @@ def seed_postgres_products():
         batch = min(BATCH_SIZE, remaining - inserted)
         values = []
         for _ in range(batch):
-            name = f"{fake.word().title()} {fake.word().title()} {random.choice(['Pro', 'Plus', 'Max', 'Lite', 'Ultra', 'Mini', 'XL'])}"
+            name = f"{_rc(POOL_WORD).title()} {_rc(POOL_WORD).title()} {random.choice(['Pro', 'Plus', 'Max', 'Lite', 'Ultra', 'Mini', 'XL'])}"
             desc = generate_large_text(800, 2000)
             cat = random.choice(CATEGORIES)
             price = round(random.uniform(0.99, 999.99), 2)
@@ -287,8 +302,8 @@ def seed_mysql_payments():
             status = random.choice(statuses)
             tx_ref = ''.join(random.choices(string.ascii_uppercase + string.digits, k=32))
             metadata = json.dumps({
-                "ip": fake.ipv4(),
-                "user_agent": fake.user_agent(),
+                "ip": _rc(POOL_IP),
+                "user_agent": _rc(POOL_UA),
                 "card_last4": f"{random.randint(1000,9999)}",
                 "processor_response": random.choice(["approved", "declined", "error", "timeout"]),
             })
@@ -407,7 +422,7 @@ def seed_mysql_orders():
             num_items = random.randint(2, 4)
             for _ in range(num_items):
                 product_id = f"{random.randint(1, 500000)}"
-                name = f"{fake.word().title()} {fake.word().title()}"
+                name = f"{_rc(POOL_WORD).title()} {_rc(POOL_WORD).title()}"
                 qty = random.randint(1, 5)
                 price = round(random.uniform(5.0, 500.0), 2)
                 item_values.append((order_id, product_id, name, qty, price))
@@ -492,10 +507,10 @@ def seed_mongodb_reviews():
                 "product_id": str(random.randint(1, 500000)),
                 "user_id": f"user-{random.randint(1, 100000)}",
                 "rating": random.randint(1, 5),
-                "title": fake.sentence(nb_words=random.randint(4, 10)),
+                "title": _rc(POOL_SENTENCE),
                 "body": generate_large_text(500, 1500),
-                "pros": [fake.sentence(nb_words=3) for _ in range(random.randint(1, 5))],
-                "cons": [fake.sentence(nb_words=3) for _ in range(random.randint(0, 3))],
+                "pros": [_rc(POOL_SENTENCE) for _ in range(random.randint(1, 5))],
+                "cons": [_rc(POOL_SENTENCE) for _ in range(random.randint(0, 3))],
                 "helpful_count": random.randint(0, 500),
                 "verified_purchase": random.random() > 0.3,
                 "created_at": created,
@@ -559,7 +574,7 @@ def seed_valkey_carts():
                     product_id = str(random.randint(1, 500000))
                     item = json.dumps({
                         "product_id": product_id,
-                        "name": f"{fake.word().title()} {fake.word().title()}",
+                        "name": f"{_rc(POOL_WORD).title()} {_rc(POOL_WORD).title()}",
                         "quantity": random.randint(1, 5),
                         "price": round(random.uniform(5.0, 500.0), 2),
                     })
@@ -570,10 +585,10 @@ def seed_valkey_carts():
                 pid = random.randint(1, 500000)
                 cache_data = json.dumps({
                     "id": pid,
-                    "name": f"{fake.word().title()} Product",
+                    "name": f"{_rc(POOL_WORD).title()} Product",
                     "price": round(random.uniform(1.0, 999.0), 2),
                     "category": random.choice(CATEGORIES),
-                    "description": fake.text(max_nb_chars=500),
+                    "description": _rc(POOL_TEXT_SHORT),
                 })
                 pipe.set(f"product:cache:{pid}", cache_data, ex=3600)
             else:
@@ -581,10 +596,10 @@ def seed_valkey_carts():
                 session_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))
                 session_data = json.dumps({
                     "user_id": f"user-{random.randint(1, 100000)}",
-                    "ip": fake.ipv4(),
-                    "user_agent": fake.user_agent(),
+                    "ip": _rc(POOL_IP),
+                    "user_agent": _rc(POOL_UA),
                     "last_activity": datetime.now().isoformat(),
-                    "preferences": {fake.word(): fake.word() for _ in range(5)},
+                    "preferences": {_rc(POOL_WORD): _rc(POOL_WORD) for _ in range(5)},
                 })
                 pipe.set(f"session:{session_id}", session_data, ex=86400)
 

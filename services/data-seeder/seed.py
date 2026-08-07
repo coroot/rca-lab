@@ -63,6 +63,15 @@ POOL_ADDRESS = [f"{fake.street_address()}, {fake.city()}, {fake.state()} {fake.z
 _rc = random.choice
 
 
+def mysql_ensure_index(cur, stmt):
+    """CREATE INDEX is not idempotent on MySQL 8; ignore 'duplicate key name'."""
+    try:
+        cur.execute(stmt)
+    except Exception as e:
+        if "Duplicate key name" not in str(e):
+            raise
+
+
 def mysql_multi_insert(cur, table, cols, rows):
     """One multi-row INSERT per batch. mysql.connector's executemany degrades
     to near row-by-row here (JSON columns), which is the MySQL bottleneck."""
@@ -129,6 +138,9 @@ def seed_postgres_products():
         )
     """)
 
+    cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (name gin_trgm_ops)")
+
     cur.execute("SELECT COUNT(*) FROM products")
     existing = cur.fetchone()[0]
     log.info(f"PostgreSQL products: {existing} existing rows")
@@ -169,9 +181,6 @@ def seed_postgres_products():
         if inserted % 50000 == 0:
             log.info(f"PostgreSQL products: {inserted}/{remaining} rows inserted")
 
-    # Create indexes (only indexes actually used by queries)
-    cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (name gin_trgm_ops)")
     conn.commit()
     conn.close()
     log.info(f"PostgreSQL products seeding complete: {inserted} rows")
@@ -290,6 +299,9 @@ def seed_mysql_payments():
         )
     """)
     conn.commit()
+    mysql_ensure_index(cur, "CREATE INDEX idx_payments_user_id ON payments(user_id)")
+    mysql_ensure_index(cur, "CREATE INDEX idx_payments_created_at ON payments(created_at DESC)")
+    conn.commit()
 
     cur.execute("SELECT COUNT(*) FROM payments")
     existing = cur.fetchone()[0]
@@ -343,16 +355,6 @@ def seed_mysql_payments():
         if inserted % 50000 == 0:
             log.info(f"MySQL payments: {inserted}/{remaining} rows inserted")
 
-    # Create indexes (only indexes actually used by queries)
-    for stmt in [
-        "CREATE INDEX idx_payments_user_id ON payments(user_id)",
-        "CREATE INDEX idx_payments_created_at ON payments(created_at DESC)",
-    ]:
-        try:
-            cur.execute(stmt)
-        except Exception:
-            pass
-    conn.commit()
     conn.close()
     log.info(f"MySQL payments seeding complete: {inserted} rows")
 
@@ -396,6 +398,9 @@ def seed_mysql_orders():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.commit()
+    mysql_ensure_index(cur, "CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC)")
+    mysql_ensure_index(cur, "CREATE INDEX idx_order_items_order_id ON order_items(order_id)")
     conn.commit()
 
     cur.execute("SELECT COALESCE(MAX(id), 0) FROM orders")
@@ -450,16 +455,6 @@ def seed_mysql_orders():
         if inserted % 50000 == 0:
             log.info(f"MySQL orders: {inserted}/{remaining} rows inserted")
 
-    # Create indexes (only indexes actually used by queries)
-    for stmt in [
-        "CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC)",
-        "CREATE INDEX idx_order_items_order_id ON order_items(order_id)",
-    ]:
-        try:
-            cur.execute(stmt)
-        except Exception:
-            pass
-    conn.commit()
     conn.close()
     log.info(f"MySQL orders seeding complete: {inserted} rows")
 
@@ -485,6 +480,10 @@ def seed_mongodb_reviews():
 
     db = client.get_default_database()
     coll = db.reviews
+    # Mongo create_index is idempotent; ensure before the early-return so the
+    # indexes exist even when the data is already seeded.
+    coll.create_index([("product_id", 1), ("created_at", -1)])
+    coll.create_index([("created_at", -1)])
 
     existing = coll.estimated_document_count()
     log.info(f"MongoDB reviews: {existing} existing documents")
@@ -528,9 +527,6 @@ def seed_mongodb_reviews():
         if inserted % 50000 == 0:
             log.info(f"MongoDB reviews: {inserted}/{remaining} documents inserted")
 
-    # Create indexes (only indexes actually used by queries)
-    coll.create_index([("product_id", 1), ("created_at", -1)])
-    coll.create_index([("created_at", -1)])
     client.close()
     log.info(f"MongoDB reviews seeding complete: {inserted} documents")
 

@@ -1,5 +1,5 @@
 name: allocation-regression
-tag: "1.1.0"
+tag: "1.2.0"
 summary: >
   Order read paths gain an in-memory "recent results" cache. The cache key
   includes a per-minute time bucket (and, for order details, the order's

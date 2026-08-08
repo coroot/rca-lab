@@ -1,34 +1,38 @@
-# A CPU-hungry batch job ("video-transcoder") lands on the same node as
-# api-gateway (via pod affinity) and pegs the node's cores. api-gateway — an
-# innocent tenant sharing that node — gets CPU-starved and slows down, even
-# though nothing is wrong with api-gateway or its dependencies. Tests whether
-# an RCA tool reasons about node-level resource contention / locality.
+# A CPU-hungry batch job ("video-transcoder") is scheduled onto the nodes
+# running order-service (via pod affinity) and burns all their cores.
+# order-service — an innocent tenant sharing those nodes — is starved of CPU:
+# its usage collapses well below what it wants, even though nothing is wrong
+# with order-service or its dependencies. Tests whether an RCA tool reasons
+# about node-level CPU contention and locality rather than blaming the victim.
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
   name: cpu-noisy-neighbor
   namespace: default
 spec:
-  displayName: CPU noisy neighbor on the api-gateway node
+  displayName: CPU noisy neighbor starving order-service
   description: >-
-    A batch "video-transcoder" workload is scheduled onto a node already
-    running api-gateway and burns all spare CPU. api-gateway competes for CPU
-    on that node and its latency rises, while its own dependencies (services,
-    databases) are healthy — the cause is a co-located noisy neighbor, not
-    anything in the request path.
+    A batch "video-transcoder" workload lands on the nodes running
+    order-service and consumes all spare CPU. order-service is Burstable (it
+    normally bursts above its request), so under node saturation it loses the
+    CPU it relies on — its usage collapses toward its request share. The
+    culprit is a co-located noisy neighbor, not order-service or its database;
+    latency for its (I/O-bound) endpoints stays low, so the tell is the CPU
+    starvation, not the latency.
   category: infra
   severity: medium
   duration: 10m
   expectedSymptoms:
-    - node CPU saturates; api-gateway pods on that node are CFS-throttled
-    - api-gateway latency rises while downstream services stay healthy
-    - the culprit is a separate "video-transcoder" workload, not api-gateway
+    - node CPU saturates (~100%) on the nodes running order-service
+    - order-service CPU usage is forced far below its normal level (starved)
+    - the culprit is a separate "video-transcoder" workload co-located on those nodes
+    - order-service's dependencies (MySQL, Kafka) stay healthy; the cause is node-local CPU
   actions:
     - name: video-transcoder
       type: Workload
       workload:
         name: video-transcoder
         image: busybox:1.36
-        cpuBurn: 4
+        cpuBurn: 16
         concurrency: 2
-        colocateWithApp: api-gateway
+        colocateWithApp: order-service

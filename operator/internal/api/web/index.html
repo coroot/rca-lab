@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rca-lab — Failure Scenarios</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #e3e6ea;
+    --text: #1c2126;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: 10px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; background: #fafbfc; }
+  tr.row-main { cursor: pointer; }
+  tr.row-main:hover { background: #f9fafb; }
+  tr:last-child td { border-bottom: none; }
+  .name { font-weight: 600; }
+  .name .id { color: var(--muted); font-weight: 400; font-size: 12px; display: block; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: capitalize; }
+  .sev-low { background: #ecfdf5; color: #047857; }
+  .sev-medium { background: #fffbeb; color: #b45309; }
+  .sev-high { background: #fef2f2; color: #b91c1c; }
+  .cat { background: #eef2ff; color: #4338ca; }
+  .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .st-Idle { color: #6b7280; } .st-Idle .dot { background: #9ca3af; }
+  .st-Active { color: #047857; } .st-Active .dot { background: #10b981; }
+  .st-Activating { color: #b45309; } .st-Activating .dot { background: #f59e0b; animation: pulse 1.2s infinite; }
+  .st-Reverting { color: #2563eb; } .st-Reverting .dot { background: #3b82f6; animation: pulse 1.2s infinite; }
+  .st-Degraded { color: #b91c1c; } .st-Degraded .dot { background: #ef4444; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .actions { white-space: nowrap; text-align: right; }
+  button {
+    font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    padding: 5px 12px; border-radius: 6px; margin-left: 6px;
+  }
+  button:hover { background: #f3f4f6; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.on { background: #10b981; border-color: #10b981; color: #fff; }
+  button.on:hover { background: #059669; }
+  button.danger { background: var(--card); border-color: var(--danger); color: var(--danger); }
+  button.danger:hover { background: var(--danger); color: #fff; }
+  tr.detail td { background: #fafbfc; padding: 0; }
+  .detail-inner { padding: 16px 18px; }
+  .detail-inner h3 { margin: 0 0 4px; font-size: 13px; }
+  .detail-inner p { margin: 0 0 14px; color: var(--muted); }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .detail-grid h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 8px; }
+  ul.symptoms { margin: 0; padding-left: 18px; }
+  ul.symptoms li { margin-bottom: 3px; }
+  .kv { font-size: 13px; }
+  .kv div { margin-bottom: 4px; }
+  .kv .k { color: var(--muted); display: inline-block; min-width: 90px; }
+  table.hist { border: none; border-radius: 0; margin-top: 4px; }
+  table.hist th, table.hist td { padding: 5px 8px; font-size: 12px; background: transparent; }
+  .res-Completed { color: #047857; } .res-Reverted { color: #6b7280; } .res-Failed { color: #b91c1c; }
+  .empty { color: var(--muted); font-style: italic; }
+  #toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    padding: 10px 18px; border-radius: 8px; color: #fff; font-weight: 600;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18); opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, bottom 0.2s; z-index: 100;
+  }
+  #toast.show { opacity: 1; bottom: 32px; }
+  #toast.ok { background: #059669; }
+  #toast.err { background: var(--danger); }
+  .loading { padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>rca-lab <span class="sub">— Failure Scenarios</span></h1></div>
+  <div>
+    <span class="sub" id="updated"></span>
+    <button class="danger" onclick="resetAll()">Reset all</button>
+  </div>
+</header>
+<main>
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th style="width:34%">Name</th>
+        <th>Category</th>
+        <th>Severity</th>
+        <th>State</th>
+        <th style="text-align:right">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td colspan="5" class="loading">Loading…</td></tr>
+    </tbody>
+  </table>
+</main>
+<div id="toast"></div>
+
+<script>
+const REFRESH_MS = 3000;
+let expanded = null;      // name of the currently expanded row
+let details = {};         // cache of fetched detail objects by name
+let busy = false;         // suppress refresh re-render while a menu interaction is mid-flight
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function toast(msg, ok) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "show " + (ok ? "ok" : "err");
+  setTimeout(() => { t.className = ""; }, 2600);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) throw new Error((data && data.error) || (res.status + " " + res.statusText));
+  return data;
+}
+
+function stateCell(phase) {
+  const p = phase || "Idle";
+  return `<span class="state st-${esc(p)}"><span class="dot"></span>${esc(p)}</span>`;
+}
+
+function sevBadge(sev) { return `<span class="badge sev-${esc(sev)}">${esc(sev)}</span>`; }
+
+function render(list) {
+  const tb = document.getElementById("rows");
+  if (!list.length) { tb.innerHTML = `<tr><td colspan="5" class="empty" style="text-align:center;padding:30px">No scenarios found.</td></tr>`; return; }
+  let html = "";
+  for (const s of list) {
+    const runId = s.currentRun ? s.currentRun.id : "";
+    html += `<tr class="row-main" onclick="toggle('${esc(s.name)}')">
+      <td class="name">${esc(s.displayName || s.name)}<span class="id">${esc(s.name)}${runId ? " · run " + esc(runId.slice(0, 8)) : ""}</span></td>
+      <td><span class="badge cat">${esc(s.category)}</span></td>
+      <td>${sevBadge(s.severity)}</td>
+      <td>${stateCell(s.phase)}</td>
+      <td class="actions" onclick="event.stopPropagation()">
+        ${s.enabled
+          ? `<button class="on" onclick="act('disable','${esc(s.name)}')">Disable</button>`
+          : `<button onclick="act('enable','${esc(s.name)}')">Enable</button>`}
+        <button class="primary" onclick="runScenario('${esc(s.name)}')">Run 15m</button>
+      </td>
+    </tr>`;
+    if (expanded === s.name) {
+      html += `<tr class="detail"><td colspan="5"><div class="detail-inner" id="detail-${esc(s.name)}">${renderDetail(s.name)}</div></td></tr>`;
+    }
+  }
+  tb.innerHTML = html;
+}
+
+function renderDetail(name) {
+  const d = details[name];
+  if (!d) return `<div class="empty">Loading detail…</div>`;
+  const symptoms = (d.expectedSymptoms || []).length
+    ? `<ul class="symptoms">${d.expectedSymptoms.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`
+    : `<span class="empty">none documented</span>`;
+
+  let run = `<span class="empty">no active run</span>`;
+  if (d.currentRun) {
+    run = `<div class="kv">
+      <div><span class="k">Run ID</span>${esc(d.currentRun.id)}</div>
+      <div><span class="k">Trigger</span>${esc(d.currentRun.trigger)}</div>
+      <div><span class="k">Started</span>${esc(fmtTime(d.currentRun.startedAt))}</div>
+      ${d.currentRun.expiresAt ? `<div><span class="k">Expires</span>${esc(fmtTime(d.currentRun.expiresAt))}</div>` : ""}
+    </div>`;
+  }
+
+  const hist = (d.history || []).length
+    ? `<table class="hist"><thead><tr><th>Run</th><th>Trigger</th><th>Ended</th><th>Result</th></tr></thead><tbody>${
+        d.history.slice().reverse().map(h => `<tr>
+          <td>${esc((h.id || "").slice(0, 8))}</td>
+          <td>${esc(h.trigger)}</td>
+          <td>${esc(h.endedAt ? fmtTime(h.endedAt) : "—")}</td>
+          <td class="res-${esc(h.result)}">${esc(h.result)}${h.message ? " — " + esc(h.message) : ""}</td>
+        </tr>`).join("")
+      }</tbody></table>`
+    : `<span class="empty">no history yet</span>`;
+
+  return `
+    <h3>${esc(d.displayName || d.name)}</h3>
+    <p>${esc(d.description || "No description.")}</p>
+    <div class="detail-grid">
+      <div>
+        <h4>Expected symptoms</h4>${symptoms}
+        <h4 style="margin-top:14px">Current run</h4>${run}
+      </div>
+      <div>
+        <h4>Recent history</h4>${hist}
+      </div>
+    </div>`;
+}
+
+function fmtTime(s) {
+  if (!s) return "";
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleString();
+}
+
+async function toggle(name) {
+  if (expanded === name) { expanded = null; refresh(); return; }
+  expanded = name;
+  refresh();
+  try {
+    details[name] = await api("GET", "/api/scenarios/" + encodeURIComponent(name));
+    const el = document.getElementById("detail-" + name);
+    if (el && expanded === name) el.innerHTML = renderDetail(name);
+  } catch (e) { toast("Detail failed: " + e.message, false); }
+}
+
+async function act(kind, name) {
+  try {
+    await api("POST", `/api/scenarios/${encodeURIComponent(name)}/${kind}`);
+    toast(`${name}: ${kind}d`, true);
+    refresh();
+  } catch (e) { toast(`${kind} failed: ${e.message}`, false); }
+}
+
+async function runScenario(name) {
+  try {
+    await api("POST", `/api/scenarios/${encodeURIComponent(name)}/run`, { durationSeconds: 900 });
+    toast(`${name}: run started (15m)`, true);
+    refresh();
+  } catch (e) { toast("Run failed: " + e.message, false); }
+}
+
+async function resetAll() {
+  if (!confirm("Disable and clear the trigger on ALL scenarios?")) return;
+  try {
+    const r = await api("POST", "/api/reset");
+    toast(`Reset ${r && r.count != null ? r.count : "all"} scenarios`, true);
+    details = {};
+    refresh();
+  } catch (e) { toast("Reset failed: " + e.message, false); }
+}
+
+async function refresh() {
+  try {
+    const list = await api("GET", "/api/scenarios");
+    render(list);
+    if (expanded && !details[expanded]) {
+      // detail still loading; leave placeholder
+    }
+    document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "connection error";
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

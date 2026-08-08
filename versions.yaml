@@ -15,7 +15,7 @@ services:
   fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
   load-generator: 1.0.0
   data-seeder: 1.0.5          # create indexes before early-return (idempotent)
-  operator: 1.0.0
+  operator: 1.1.0             # embedded web UI + REST API on :8080
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).
 charts:

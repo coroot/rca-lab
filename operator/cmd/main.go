@@ -17,6 +17,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/coroot/rca-lab/operator/api/v1alpha1"
+	"github.com/coroot/rca-lab/operator/internal/api"
 	"github.com/coroot/rca-lab/operator/internal/controller"
 	"github.com/coroot/rca-lab/operator/internal/dbtool"
 )
@@ -93,6 +94,11 @@ func runManager(_ []string) {
 
 	if err := mgr.Add(&controller.Sweeper{Client: mgr.GetClient(), Namespace: namespace}); err != nil {
 		setupLog.Error(err, "unable to add startup sweeper")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(api.NewServer(mgr.GetClient(), ":8080")); err != nil {
+		setupLog.Error(err, "unable to add API/UI server")
 		os.Exit(1)
 	}
 

@@ -1,5 +1,5 @@
 name: allocation-regression
-tag: "1.2.0"
+tag: "1.3.0"
 summary: >
   Order create and read paths render a "receipt" (256KB) and retain it in an
   unbounded in-memory cache keyed by a unique id, never evicted. Under

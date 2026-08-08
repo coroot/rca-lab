@@ -31,6 +31,8 @@ public class OrderService {
     // (rising GC time, heap sawtooth toward -Xmx, eventual OutOfMemoryError).
     private static final Map<String, byte[]> renderedReceiptCache = new ConcurrentHashMap<>();
     private static final int RECEIPT_BYTES = 256 * 1024;
+    // Sink so the reconcile scan isn't optimized away by the JIT.
+    private static volatile long reconcileSink;
 
     public OrderService(OrderRepository orderRepository,
                         PaymentClient paymentClient,
@@ -55,9 +57,28 @@ public class OrderService {
         renderedReceiptCache.put(orderId + ":" + System.nanoTime(), receipt);
     }
 
+    // "Reconcile" the order against previously rendered receipts before
+    // returning it (added in this version to de-duplicate receipts). This
+    // scans the whole receipt cache on every read — cheap when the cache is
+    // small, but since the cache grows without bound the per-request cost
+    // climbs steadily: read latency degrades over time and propagates upstream
+    // to the API gateway. O(cache size) CPU + memory-bandwidth per request.
+    private long reconcileReceipts() {
+        long checksum = 0;
+        for (byte[] receipt : renderedReceiptCache.values()) {
+            int span = Math.min(receipt.length, 4096);
+            for (int i = 0; i < span; i++) {
+                checksum = checksum * 31 + receipt[i];
+            }
+        }
+        return checksum;
+    }
+
     @Transactional(readOnly = true)
     public Slice<OrderSummary> getAllOrders(Pageable pageable) {
-        return orderRepository.findByOrderByIdDesc(pageable);
+        Slice<OrderSummary> result = orderRepository.findByOrderByIdDesc(pageable);
+        reconcileSink = reconcileReceipts();
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -65,12 +86,15 @@ public class OrderService {
         Order order = orderRepository.findByIdWithItems(id)
                 .orElseThrow(() -> new RuntimeException("Order not found with id: " + id));
         renderAndRetainReceipt(order.getId(), order.getUserId(), order.getTotal());
+        reconcileSink = reconcileReceipts();
         return order;
     }
 
     @Transactional(readOnly = true)
     public Slice<OrderSummary> getOrdersByUserId(String userId, Pageable pageable) {
-        return orderRepository.findByUserIdOrderByIdDesc(userId, pageable);
+        Slice<OrderSummary> result = orderRepository.findByUserIdOrderByIdDesc(userId, pageable);
+        reconcileSink = reconcileReceipts();
+        return result;
     }
 
     @Transactional

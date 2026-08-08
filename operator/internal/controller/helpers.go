@@ -27,16 +27,20 @@ func validateSpec(spec *v1alpha1.FailureScenarioSpec) error {
 		seen[a.Name] = true
 		switch a.Type {
 		case v1alpha1.ActionTypeWorkload:
-			if a.Workload == nil || a.Scale != nil || a.DeployImage != nil {
+			if a.Workload == nil || a.Scale != nil || a.DeployImage != nil || a.ChaosMesh != nil {
 				return fmt.Errorf("action %q: type Workload requires exactly the workload field", a.Name)
 			}
 		case v1alpha1.ActionTypeScale:
-			if a.Scale == nil || a.Workload != nil || a.DeployImage != nil {
+			if a.Scale == nil || a.Workload != nil || a.DeployImage != nil || a.ChaosMesh != nil {
 				return fmt.Errorf("action %q: type Scale requires exactly the scale field", a.Name)
 			}
 		case v1alpha1.ActionTypeDeployImage:
-			if a.DeployImage == nil || a.Workload != nil || a.Scale != nil {
+			if a.DeployImage == nil || a.Workload != nil || a.Scale != nil || a.ChaosMesh != nil {
 				return fmt.Errorf("action %q: type DeployImage requires exactly the deployImage field", a.Name)
+			}
+		case v1alpha1.ActionTypeChaosMesh:
+			if a.ChaosMesh == nil || a.Workload != nil || a.Scale != nil || a.DeployImage != nil {
+				return fmt.Errorf("action %q: type ChaosMesh requires exactly the chaosMesh field", a.Name)
 			}
 		default:
 			return fmt.Errorf("action %q: unknown type %q", a.Name, a.Type)

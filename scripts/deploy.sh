@@ -26,6 +26,7 @@ PXC_OPERATOR_CHART=1.20.0
 PSMDB_OPERATOR_CHART=1.23.0
 STRIMZI_CHART=1.1.0
 VALKEY_OPERATOR_CHART=0.4.1
+CHAOS_MESH_CHART=2.7.2
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*"; }
@@ -81,12 +82,14 @@ install_operators() {
     helm repo add percona https://percona.github.io/percona-helm-charts/ >/dev/null
     helm repo add strimzi https://strimzi.io/charts/ >/dev/null
     helm repo add valkey https://valkey.io/valkey-helm >/dev/null
-    helm repo update percona strimzi valkey >/dev/null
+    helm repo add chaos-mesh https://charts.chaos-mesh.org >/dev/null
+    helm repo update percona strimzi valkey chaos-mesh >/dev/null
     install_operator pg-operator percona/pg-operator pg-operator "$PG_OPERATOR_CHART" deploy/operators/pg-operator.values.yaml
     install_operator pxc-operator percona/pxc-operator pxc-operator "$PXC_OPERATOR_CHART" deploy/operators/pxc-operator.values.yaml
     install_operator psmdb-operator percona/psmdb-operator psmdb-operator "$PSMDB_OPERATOR_CHART" deploy/operators/psmdb-operator.values.yaml
     install_operator strimzi strimzi/strimzi-kafka-operator strimzi "$STRIMZI_CHART" deploy/operators/strimzi.values.yaml
     install_operator valkey-operator valkey/valkey-operator valkey-operator "$VALKEY_OPERATOR_CHART" deploy/operators/valkey-operator.values.yaml
+    install_operator chaos-mesh chaos-mesh/chaos-mesh chaos-mesh "$CHAOS_MESH_CHART" deploy/operators/chaos-mesh.values.yaml
 }
 
 apply_databases() {

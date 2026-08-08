@@ -1,0 +1,31 @@
+# Chaos Mesh — used for network-fault scenarios (NetworkChaos etc.).
+# Cluster-scoped by default (clusterScoped: true), installed into its own
+# chaos-mesh namespace. The chaos-daemon must talk to the node's container
+# runtime; this cluster is k3s, so point it at the k3s containerd socket.
+chaosDaemon:
+  runtime: containerd
+  socketPath: /run/k3s/containerd/containerd.sock
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+controllerManager:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# We don't need Chaos Mesh's own web UI; the lab drives it via CRs.
+dashboard:
+  create: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi

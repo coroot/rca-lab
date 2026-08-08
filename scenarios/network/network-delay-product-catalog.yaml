@@ -1,0 +1,41 @@
+# Injects network latency into traffic reaching product-catalog (via Chaos
+# Mesh NetworkChaos). Product-catalog responses slow down, and the added
+# latency propagates upstream to the api-gateway — with no change in CPU,
+# error rate, or query time at product-catalog itself: a pure "where did the
+# time go" network-path signal.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: network-delay-product-catalog
+  namespace: default
+spec:
+  displayName: Network delay to product-catalog
+  description: >-
+    Chaos Mesh adds ~200ms (±50ms) of latency to packets arriving at
+    product-catalog. Client-observed latency at the api-gateway rises while
+    product-catalog's own server-side processing time and CPU stay flat — the
+    delay is on the network path, not in the service or its database.
+  category: network
+  severity: medium
+  duration: 10m
+  expectedSymptoms:
+    - product-catalog p99 latency rises ~200ms with flat CPU and DB time
+    - api-gateway latency on catalog routes rises by the same ~200ms
+    - error rate unchanged; the gap is client-side (network), not server-side
+  actions:
+    - name: delay-catalog
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: delay
+          mode: all
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              app: product-catalog
+          delay:
+            latency: "200ms"
+            jitter: "50ms"
+            correlation: "50"
+          direction: to

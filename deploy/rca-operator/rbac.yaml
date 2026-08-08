@@ -48,6 +48,10 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: [leases]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Chaos Mesh fault objects (ChaosMesh action)
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["networkchaos","stresschaos","iochaos","podchaos","timechaos","httpchaos","dnschaos"]
+    verbs: [get, list, watch, create, update, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

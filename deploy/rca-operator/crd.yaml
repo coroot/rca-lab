@@ -63,6 +63,30 @@ spec:
                 items:
                   description: Action is a single failure-injection step.
                   properties:
+                    chaosMesh:
+                      description: |-
+                        ChaosMeshAction creates a Chaos Mesh custom resource (e.g. NetworkChaos,
+                        StressChaos) verbatim and deletes it on revert. Chaos Mesh's own duration
+                        field is set as a dead-man switch so the fault self-recovers if the operator
+                        dies.
+                      properties:
+                        kind:
+                          description: Kind of Chaos Mesh resource, e.g. NetworkChaos,
+                            StressChaos.
+                          minLength: 1
+                          type: string
+                        name:
+                          description: Name of the created chaos object (defaults
+                            to fs-<scenario>-<action>).
+                          type: string
+                        spec:
+                          description: Spec is the Chaos Mesh object's .spec, passed
+                            through verbatim.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - kind
+                      - spec
+                      type: object
                     delay:
                       description: Delay offsets this action's activation from the
                         run start.
@@ -155,11 +179,18 @@ spec:
                       - Workload
                       - Scale
                       - DeployImage
+                      - ChaosMesh
                       type: string
                     workload:
                       description: WorkloadAction runs a database-load Job that looks
                         like a real workload.
                       properties:
+                        colocateWithApp:
+                          description: |-
+                            ColocateWithApp schedules the workload onto nodes already running pods of
+                            this app (label app=<value> in the same namespace) via podAffinity — a
+                            realistic "noisy neighbor" that steals CPU from that app's node.
+                          type: string
                         command:
                           description: Command overrides the generated dbtool arguments.
                           items:
@@ -171,6 +202,13 @@ spec:
                             (Job parallelism).
                           format: int32
                           minimum: 1
+                          type: integer
+                        cpuBurn:
+                          description: |-
+                            CPUBurn, when >0, runs this many busy-loop workers instead of dbtool (a
+                            CPU hog). Requires image (e.g. busybox) and command, or defaults to a
+                            shell busy-loop. Engine/Queries are ignored.
+                          format: int32
                           type: integer
                         deadlineMargin:
                           description: |-
@@ -374,11 +412,11 @@ spec:
                   - type
                   type: object
                   x-kubernetes-validations:
-                  - message: exactly one of workload/scale/deployImage must be set
-                      and must match type
+                  - message: exactly one of workload/scale/deployImage/chaosMesh must
+                      be set and must match type
                     rule: (self.type == 'Workload') == has(self.workload) && (self.type
                       == 'Scale') == has(self.scale) && (self.type == 'DeployImage')
-                      == has(self.deployImage)
+                      == has(self.deployImage) && (self.type == 'ChaosMesh') == has(self.chaosMesh)
                 minItems: 1
                 type: array
               category:

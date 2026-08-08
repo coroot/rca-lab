@@ -46,6 +46,7 @@ const (
 	ActionTypeWorkload    = "Workload"
 	ActionTypeScale       = "Scale"
 	ActionTypeDeployImage = "DeployImage"
+	ActionTypeChaosMesh   = "ChaosMesh"
 )
 
 // TriggerSpec requests a one-shot manual run: a runID different from
@@ -97,6 +98,16 @@ type WorkloadAction struct {
 	// activeDeadlineSeconds safety net. Defaults to 5m.
 	// +optional
 	DeadlineMargin *metav1.Duration `json:"deadlineMargin,omitempty"`
+	// ColocateWithApp schedules the workload onto nodes already running pods of
+	// this app (label app=<value> in the same namespace) via podAffinity — a
+	// realistic "noisy neighbor" that steals CPU from that app's node.
+	// +optional
+	ColocateWithApp string `json:"colocateWithApp,omitempty"`
+	// CPUBurn, when >0, runs this many busy-loop workers instead of dbtool (a
+	// CPU hog). Requires image (e.g. busybox) and command, or defaults to a
+	// shell busy-loop. Engine/Queries are ignored.
+	// +optional
+	CPUBurn int32 `json:"cpuBurn,omitempty"`
 }
 
 // ScaleTargetRef identifies the object a Scale action operates on.
@@ -140,13 +151,29 @@ type DeployImageAction struct {
 	RolloutTimeout *metav1.Duration `json:"rolloutTimeout,omitempty"`
 }
 
+// ChaosMeshAction creates a Chaos Mesh custom resource (e.g. NetworkChaos,
+// StressChaos) verbatim and deletes it on revert. Chaos Mesh's own duration
+// field is set as a dead-man switch so the fault self-recovers if the operator
+// dies.
+type ChaosMeshAction struct {
+	// Kind of Chaos Mesh resource, e.g. NetworkChaos, StressChaos.
+	// +kubebuilder:validation:MinLength=1
+	Kind string `json:"kind"`
+	// Name of the created chaos object (defaults to fs-<scenario>-<action>).
+	// +optional
+	Name string `json:"name,omitempty"`
+	// Spec is the Chaos Mesh object's .spec, passed through verbatim.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Spec apiextensionsv1.JSON `json:"spec"`
+}
+
 // Action is a single failure-injection step.
-// +kubebuilder:validation:XValidation:rule="(self.type == 'Workload') == has(self.workload) && (self.type == 'Scale') == has(self.scale) && (self.type == 'DeployImage') == has(self.deployImage)",message="exactly one of workload/scale/deployImage must be set and must match type"
+// +kubebuilder:validation:XValidation:rule="(self.type == 'Workload') == has(self.workload) && (self.type == 'Scale') == has(self.scale) && (self.type == 'DeployImage') == has(self.deployImage) && (self.type == 'ChaosMesh') == has(self.chaosMesh)",message="exactly one of workload/scale/deployImage/chaosMesh must be set and must match type"
 type Action struct {
 	// Name is unique within the scenario.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
-	// +kubebuilder:validation:Enum=Workload;Scale;DeployImage
+	// +kubebuilder:validation:Enum=Workload;Scale;DeployImage;ChaosMesh
 	Type string `json:"type"`
 	// Delay offsets this action's activation from the run start.
 	// +optional
@@ -157,6 +184,8 @@ type Action struct {
 	Scale *ScaleAction `json:"scale,omitempty"`
 	// +optional
 	DeployImage *DeployImageAction `json:"deployImage,omitempty"`
+	// +optional
+	ChaosMesh *ChaosMeshAction `json:"chaosMesh,omitempty"`
 }
 
 // FailureScenarioSpec defines the desired state of a FailureScenario.

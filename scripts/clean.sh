@@ -65,6 +65,7 @@ helm uninstall pxc-operator -n pxc-operator 2>/dev/null || true
 helm uninstall psmdb-operator -n psmdb-operator 2>/dev/null || true
 helm uninstall strimzi -n strimzi 2>/dev/null || true
 helm uninstall valkey-operator -n valkey-operator 2>/dev/null || true
+helm uninstall chaos-mesh -n chaos-mesh 2>/dev/null || true
 kubectl delete -f deploy/namespaces.yaml --ignore-not-found
 
 info "Done"

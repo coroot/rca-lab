@@ -1,0 +1,17 @@
+name: memory-leak
+tag: "1.1.0"
+summary: >
+  A new "personalization cache" in GetRecommendations computes a per-request
+  personalization profile (~256KB) and appends it to an unbounded package-level
+  map keyed by a unique per-call id (request-derived id plus a nanosecond
+  timestamp), never evicted. Under sustained gRPC load the cache grows without
+  bound: process RSS and Go heap climb steadily, goroutine/heap allocation rise,
+  and the container eventually exceeds its memory limit and is OOMKilled
+  (exit 137), then restarts — producing a sawtooth memory profile. A genuine
+  memory leak introduced by a new release.
+expected_symptoms:
+  - recommendation-service RSS climbs steadily under load after the rollout
+  - Go heap in-use and goroutine/allocation counts grow without leveling off
+  - container hits its memory limit and is OOMKilled (exit 137), then restarts (sawtooth RSS)
+  - product-catalog and api-gateway see recommendation gRPC errors/timeouts during the restarts
+  - symptom onset correlates exactly with the recommendation-service deployment rollout

@@ -161,7 +161,25 @@ flowchart LR
 
 Everything lab-related runs in the `default` namespace; the database and Kafka
 operators live in their own (`pg-operator`, `pxc-operator`, `psmdb-operator`,
-`strimzi`).
+`strimzi`, `valkey-operator`, `chaos-mesh`).
+
+## Services
+
+Each is a separate deployable in `services/`, instrumented with OpenTelemetry.
+
+| Service | Language / framework | Role | Backing store |
+|---------|----------------------|------|---------------|
+| `api-gateway` | Python · FastAPI | Public entry point; reverse-proxies to the services | — |
+| `product-catalog` | Go · net/http + pgx | Product listing & search; calls recommendation over gRPC | PostgreSQL `products` |
+| `recommendation-service` | Go · gRPC | Product recommendations | in-memory |
+| `cart-service` | Python · Flask | Shopping cart | Valkey (cluster) |
+| `order-service` | Java · Spring Boot | Orders; publishes `order-events`, consumes `shipment-events` | MySQL `orders` |
+| `payment-service` | Rust · Actix-web + sqlx | Payment processing | MySQL `payments` |
+| `inventory-service` | PHP · FPM + nginx | Stock levels & reservations | PostgreSQL `inventory` |
+| `review-service` | Node.js · Express + Mongoose | Product reviews | MongoDB `reviews` |
+| `fulfillment-service` | Go · franz-go | Consumes `order-events` → reserves stock, writes shipments, emits `shipment-events` | MySQL `orders`, Kafka |
+| `load-generator` | Go | Continuously drives realistic traffic through the gateway | — |
+| `data-seeder` | Python | One-off Job that seeds the databases | all databases |
 
 ## Repository layout
 

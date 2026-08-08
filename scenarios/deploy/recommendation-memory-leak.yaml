@@ -1,0 +1,36 @@
+# A genuine bad deploy: recommendation-service rolls out 1.1.0, built from the
+# memory-leak variant (services/recommendation-service/variants/memory-leak/).
+# Every gRPC call retains a ~256KB "personalization profile" in an unbounded
+# map, so RSS climbs until the container hits its memory limit and is
+# OOMKilled, then restarts — a memory leak introduced by a new release.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: recommendation-memory-leak
+  namespace: default
+spec:
+  displayName: "Bad deploy: recommendation-service memory leak"
+  description: >-
+    recommendation-service version 1.1.0 leaks memory on every request (an
+    unbounded personalization cache). Under gRPC load from product-catalog its
+    RSS grows steadily until the container memory limit triggers an OOMKill and
+    the pod restarts, repeatedly. During restarts, product-catalog and the
+    api-gateway see recommendation errors/timeouts. Reverting rolls the
+    Deployment back to the known-good image.
+  category: deploy
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - recommendation-service RSS climbs steadily under load (Go heap growth)
+    - container hits its memory limit and is OOMKilled (exit 137), then restarts
+    - restart sawtooth; product-catalog/api-gateway see recommendation gRPC errors during restarts
+    - onset correlates exactly with the recommendation-service rollout
+  actions:
+    - name: roll-out-leak
+      type: DeployImage
+      deployImage:
+        targetRef:
+          kind: Deployment
+          name: recommendation-service
+        container: recommendation-service
+        image: ghcr.io/coroot/rca-lab/recommendation-service:1.1.0

@@ -15,7 +15,7 @@ services:
   fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
   load-generator: 1.0.0
   data-seeder: 1.0.5          # create indexes before early-return (idempotent)
-  operator: 1.1.1             # UI: clear Start/Stop, drop severity
+  operator: 1.2.0             # ChaosMesh action + Workload cpu-burn/affinity
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).
 charts:
@@ -24,6 +24,7 @@ charts:
   psmdb-operator: 1.23.0    # Percona Operator for MongoDB
   strimzi-kafka-operator: 1.1.0
   valkey-operator: 0.4.1    # valkey-io/valkey-operator (Valkey Cluster)
+  chaos-mesh: 2.7.2         # chaos-mesh (NetworkChaos etc. for fault scenarios)
 
 images:
   postgres: docker.io/percona/percona-distribution-postgresql:18.3-2

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -147,5 +149,69 @@ func TestScaleTokenRoundTrip(t *testing.T) {
 	done, _, err = s.Revert(ctx, empty, rc, raw)
 	if err != nil || !done {
 		t.Fatalf("Revert on vanished target: done=%v err=%v", done, err)
+	}
+}
+
+// TestChaosMeshTokenAndBuild checks the ChaosMesh token round-trips and that
+// buildChaos wires the dead-man duration, owner ref, scenario label and
+// verbatim spec passthrough.
+func TestChaosMeshTokenAndBuild(t *testing.T) {
+	rc := testRC()
+	rc.RunDuration = 15 * time.Minute
+
+	ca := &v1alpha1.ChaosMeshAction{
+		Kind: "NetworkChaos",
+		Spec: apiextensionsv1.JSON{Raw: []byte(`{"action":"delay","mode":"all"}`)},
+	}
+	spec := &v1alpha1.Action{Name: "net-delay", Type: v1alpha1.ActionTypeChaosMesh, ChaosMesh: ca}
+	m := &ChaosMesh{}
+
+	name := chaosObjectName(ca, rc, spec.Name)
+	if name != "fs-pg-analytics-queries-net-delay" {
+		t.Fatalf("name = %q", name)
+	}
+
+	tok := ChaosMeshToken{APIVersion: chaosMeshAPIVersion, Kind: ca.Kind, Namespace: rc.Namespace, Name: name}
+	raw, err := json.Marshal(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ChaosMeshToken
+	if err := json.Unmarshal(raw, &back); err != nil || back != tok {
+		t.Fatalf("token round-trip: %+v err=%v", back, err)
+	}
+
+	obj, err := m.buildChaos(rc, ca, tok)
+	if err != nil {
+		t.Fatalf("buildChaos: %v", err)
+	}
+	if obj.GetAPIVersion() != chaosMeshAPIVersion || obj.GetKind() != "NetworkChaos" {
+		t.Fatalf("gvk = %s/%s", obj.GetAPIVersion(), obj.GetKind())
+	}
+	if obj.GetLabels()[ScenarioLabel] != rc.ScenarioName {
+		t.Fatalf("missing scenario label: %v", obj.GetLabels())
+	}
+	if refs := obj.GetOwnerReferences(); len(refs) != 1 || refs[0].Name != rc.ScenarioName || refs[0].UID != rc.ScenarioUID {
+		t.Fatalf("owner refs = %+v", refs)
+	}
+	cs, _ := obj.Object["spec"].(map[string]any)
+	if cs["action"] != "delay" || cs["mode"] != "all" {
+		t.Fatalf("spec not passed through: %v", cs)
+	}
+	// Dead-man switch: run duration + 5m margin.
+	if cs["duration"] != "20m0s" {
+		t.Fatalf("duration = %v, want 20m0s", cs["duration"])
+	}
+
+	// A caller-provided duration is left untouched; 0 run duration -> 24h.
+	ca2 := &v1alpha1.ChaosMeshAction{Kind: "StressChaos", Spec: apiextensionsv1.JSON{Raw: []byte(`{"duration":"3m"}`)}}
+	obj2, _ := m.buildChaos(rc, ca2, tok)
+	if obj2.Object["spec"].(map[string]any)["duration"] != "3m" {
+		t.Fatalf("caller duration overwritten")
+	}
+	rc.RunDuration = 0
+	obj3, _ := m.buildChaos(rc, ca, tok)
+	if obj3.Object["spec"].(map[string]any)["duration"] != "24h" {
+		t.Fatalf("unbounded duration = %v, want 24h", obj3.Object["spec"].(map[string]any)["duration"])
 	}
 }

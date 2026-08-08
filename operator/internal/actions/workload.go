@@ -28,6 +28,9 @@ const (
 	defaultDeadlineMargin = 5 * time.Minute
 	// unboundedRunDeadline caps Jobs of scenarios without duration/expiry.
 	unboundedRunDeadline = 24 * time.Hour
+	// defaultCPUBurnImage is the image used for a CPU noisy-neighbor when the
+	// action does not set one.
+	defaultCPUBurnImage = "busybox:1.36"
 )
 
 // WorkloadToken is the self-contained revert token of a Workload action.
@@ -91,9 +94,17 @@ func (w *Workload) Ensure(ctx context.Context, c client.Client, rc RunContext, s
 func (w *Workload) buildJob(rc RunContext, spec *v1alpha1.Action) *batchv1.Job {
 	wa := spec.Workload
 
+	cpuBurn := wa.CPUBurn > 0
+
 	concurrency := wa.Concurrency
 	if concurrency <= 0 {
-		concurrency = defaultConcurrency
+		// A CPU hog defaults to a single pod (the burn is per-pod); dbtool load
+		// defaults to two parallel workers.
+		if cpuBurn {
+			concurrency = 1
+		} else {
+			concurrency = defaultConcurrency
+		}
 	}
 	interval := defaultInterval
 	if wa.Interval != nil {
@@ -110,14 +121,65 @@ func (w *Workload) buildJob(rc RunContext, spec *v1alpha1.Action) *batchv1.Job {
 
 	image := wa.Image
 	if image == "" {
-		image = rc.OperatorImage
+		if cpuBurn {
+			image = defaultCPUBurnImage
+		} else {
+			image = rc.OperatorImage
+		}
 	}
 	args := wa.Command
 	if len(args) == 0 {
-		// Concurrency is expressed via Job parallelism; each pod runs one loop.
-		args = []string{"dbtool", "--engine", wa.Engine, "--interval", interval.String(), "--concurrency", "1"}
-		for _, q := range wa.Queries {
-			args = append(args, "--query", q)
+		if cpuBurn {
+			// Spawn CPUBurn busy loops that peg cores until the pod is killed.
+			args = []string{"sh", "-c", fmt.Sprintf(
+				"for i in $(seq 1 %d); do while :; do :; done & done; wait", wa.CPUBurn)}
+		} else {
+			// Concurrency is expressed via Job parallelism; each pod runs one loop.
+			args = []string{"dbtool", "--engine", wa.Engine, "--interval", interval.String(), "--concurrency", "1"}
+			for _, q := range wa.Queries {
+				args = append(args, "--query", q)
+			}
+		}
+	}
+
+	// A noisy neighbor gets real CPU requests so the scheduler places it and CFS
+	// lets it actually burn; no CPU limit so it consumes all spare cycles.
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+	if cpuBurn {
+		resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+		}
+	}
+
+	var affinity *corev1.Affinity
+	if wa.ColocateWithApp != "" {
+		// Land on a node already running the victim app's pods so the CPU hog
+		// steals cycles from it.
+		affinity = &corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": wa.ColocateWithApp},
+					},
+					Namespaces:  []string{rc.Namespace},
+					TopologyKey: "kubernetes.io/hostname",
+				}},
+			},
 		}
 	}
 
@@ -150,21 +212,13 @@ func (w *Workload) buildJob(rc RunContext, spec *v1alpha1.Action) *batchv1.Job {
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					Affinity:      affinity,
 					Containers: []corev1.Container{{
-						Name:  wa.Name,
-						Image: image,
-						Args:  args,
-						Env:   wa.Env,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("128Mi"),
-							},
-							Limits: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("512Mi"),
-							},
-						},
+						Name:      wa.Name,
+						Image:     image,
+						Args:      args,
+						Env:       wa.Env,
+						Resources: resources,
 					}},
 				},
 			},

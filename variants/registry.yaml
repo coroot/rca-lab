@@ -3,12 +3,11 @@ variants:
 - image: ghcr.io/coroot/rca-lab/order-service:1.2.0
   service: order-service
   variant: allocation-regression
-  summary: 'Order read paths gain an in-memory "recent results" cache. The cache key
-    includes a per-minute time bucket (and, for order details, the order''s mutable
-    state), so entries are effectively never reused: every request deep-copies its
-    result set into new maps/strings that the LRU retains up to 30k entries (~hundreds
-    of MB against a 1G heap). Allocation rate and old-generation occupancy climb,
-    GC time grows, p99 latency degrades at flat RPS.
+  summary: 'Order create and read paths render a "receipt" (256KB) and retain it in
+    an unbounded in-memory cache keyed by a unique id, never evicted. Under sustained
+    order traffic the cache grows without bound: heap occupancy climbs toward -Xmx
+    in a sawtooth, GC time and CPU rise, and the JVM eventually hits OutOfMemoryError
+    and restarts. A genuine memory leak introduced by a new version.
 
     '
   expectedSymptoms:

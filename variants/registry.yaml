@@ -16,6 +16,52 @@ variants:
   - heap usage sawtooth rises toward the max; frequent mixed/old-gen collections
   - no upstream/downstream service degradation precedes the change
   - symptom onset correlates exactly with the order-service deployment rollout
+- image: ghcr.io/coroot/rca-lab/order-service:1.4.0
+  service: order-service
+  variant: audit-trail-leak
+  summary: "A new \"access audit trail\" for the compliance report records a batch\
+    \ of fine-grained access entries into a process-wide registry on every order read,\
+    \ but nothing ever prunes or flushes it. Unlike the fast crash-leak in 1.3.0 (a\
+    \ few very large objects that exhaust the heap in minutes), this leaks a huge\
+    \ number of *small* objects: the live set grows into the millions, so the JVM\
+    \ must trace an ever-larger object graph on every collection. Old-gen occupancy\
+    \ creeps up while G1 mark and mixed-collection time and frequency rise, and order-service\
+    \ latency degrades gradually \u2014 a performance regression that shows up well\
+    \ before the heap is ever exhausted. A genuine memory leak introduced by a new\
+    \ version that manifests as slow degradation, not an immediate OOM.\n"
+  expectedSymptoms:
+  - order-service p95/p99 latency creeps up gradually after the rollout (not a step
+    change, not a crash)
+  - JVM live-set / old-gen occupancy trends upward; heap baseline after each GC keeps
+    rising
+  - GC time fraction and mixed/old-gen collection frequency increase; pauses lengthen
+    as the live set grows
+  - "object/instance counts climb into the millions; no single large allocation \u2014\
+    \ many small retained objects"
+  - MySQL, Kafka and downstreams stay healthy; onset correlates exactly with the order-service
+    rollout; rollback restores latency
+- image: ghcr.io/coroot/rca-lab/product-catalog:1.1.0
+  service: product-catalog
+  variant: gc-pressure
+  summary: "The storefront redesign added server-side \"product cards\": every read\
+    \ path (list, category, search, product detail) re-encodes each returned product\
+    \ once per responsive breakpoint into large scratch buffers that are discarded\
+    \ when the request returns. Nothing is retained \u2014 there is no leak \u2014\
+    \ but the allocation rate explodes under normal read traffic, so the Go garbage\
+    \ collector runs almost continuously. product-catalog pods burn their CPU in GC\
+    \ and their read latency climbs; the degradation propagates up to the api-gateway.\
+    \ Pure GC (allocation) pressure from a new release, not a leak.\n"
+  expectedSymptoms:
+  - product-catalog GC CPU fraction and GC cycle frequency rise sharply after the
+    rollout
+  - Go allocation rate (bytes/heap objects allocated per second) jumps; heap in-use
+    stays bounded (no leak, no OOM)
+  - product-catalog CPU saturates toward its limit and throttles; read p95/p99 latency
+    rises
+  - api-gateway latency for catalog-backed endpoints rises with unchanged request
+    rate
+  - PostgreSQL and all downstreams stay healthy; onset correlates exactly with the
+    product-catalog rollout
 - image: ghcr.io/coroot/rca-lab/recommendation-service:1.1.0
   service: recommendation-service
   variant: memory-leak
@@ -35,3 +81,25 @@ variants:
   - product-catalog and api-gateway see recommendation gRPC errors/timeouts during
     the restarts
   - symptom onset correlates exactly with the recommendation-service deployment rollout
+- image: ghcr.io/coroot/rca-lab/review-service:1.1.0
+  service: review-service
+  variant: event-loop-block
+  summary: "A new \"content safety\" feature scans every review list for profanity\
+    \ and PII before returning it \u2014 but it shipped as a synchronous, pure-CPU\
+    \ loop that runs on the request path. Because Node.js is single-threaded, this\
+    \ blocks the event loop for tens of milliseconds on every read, so no other request,\
+    \ timer, or I/O callback can run while it executes. Under concurrent traffic requests\
+    \ queue behind one another: event-loop lag spikes, one CPU core pegs at 100%,\
+    \ and latency balloons \u2014 even though MongoDB is healthy and every query is\
+    \ fast. A genuine regression from a new release (the work belonged in a worker\
+    \ thread or an offline job).\n"
+  expectedSymptoms:
+  - review-service p95/p99 latency rises sharply after the rollout at unchanged request
+    rate
+  - Node.js event-loop lag/utilization spikes; a single CPU core saturates (single-threaded)
+  - latency grows with concurrency (requests serialize behind the blocking loop),
+    not with DB time
+  - "MongoDB stays healthy \u2014 query latency and server load are flat; the bottleneck\
+    \ is in-process CPU"
+  - onset correlates exactly with the review-service rollout; rolling back restores
+    latency

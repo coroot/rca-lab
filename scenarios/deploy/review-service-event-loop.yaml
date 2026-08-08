@@ -1,0 +1,45 @@
+# A genuine bad deploy: review-service 1.1.0 is the event-loop-block variant
+# (services/review-service/variants/event-loop-block/) — a new synchronous
+# "content safety" scan runs a pure-CPU loop on the request path, blocking the
+# single-threaded Node.js event loop for tens of milliseconds per read. The
+# rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: review-service-event-loop
+  namespace: default
+spec:
+  displayName: "Bad deploy: review-service event-loop saturation"
+  description: >-
+    review-service rolls out version 1.1.0, which adds a synchronous
+    "content safety" scan (profanity/PII) that runs a CPU-bound loop on the
+    request path. Because Node.js is single-threaded, this blocks the event
+    loop for tens of milliseconds on every read, so no other request, timer,
+    or I/O callback can make progress while it runs. Under concurrent traffic
+    requests serialize behind it: event-loop lag spikes, one CPU core pegs at
+    100%, and latency balloons — even though MongoDB is healthy and every query
+    is fast. Reverting rolls the Deployment back to the known-good image.
+  category: deploy
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - review-service p95/p99 latency rises sharply after the rollout at unchanged request rate
+    - Node.js event-loop lag/utilization spikes; a single CPU core saturates (single-threaded)
+    - latency grows with concurrency (requests serialize behind the blocking loop), not with DB time
+    - MongoDB stays healthy — query latency and server load flat; the bottleneck is in-process CPU
+    - onset correlates exactly with the review-service rollout; rollback restores latency
+  actions:
+    - name: roll-out-event-loop-block
+      type: DeployImage
+      deployImage:
+        targetRef:
+          kind: Deployment
+          name: review-service
+        container: review-service
+        # The regression image (a bad-deploy variant). Its tag is declared in
+        # services/review-service/variants/event-loop-block/variant.yaml and
+        # recorded in variants/registry.yaml.
+        image: ghcr.io/coroot/rca-lab/review-service:1.1.0
+        # knownGoodImage is intentionally omitted: the operator records the
+        # image review-service is actually running at activation and rolls
+        # back to exactly that, so the rollback target never drifts.

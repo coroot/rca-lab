@@ -1,0 +1,18 @@
+name: event-loop-block
+tag: "1.1.0"
+summary: >
+  A new "content safety" feature scans every review list for profanity and PII
+  before returning it — but it shipped as a synchronous, pure-CPU loop that runs
+  on the request path. Because Node.js is single-threaded, this blocks the event
+  loop for tens of milliseconds on every read, so no other request, timer, or
+  I/O callback can run while it executes. Under concurrent traffic requests queue
+  behind one another: event-loop lag spikes, one CPU core pegs at 100%, and
+  latency balloons — even though MongoDB is healthy and every query is fast. A
+  genuine regression from a new release (the work belonged in a worker thread or
+  an offline job).
+expected_symptoms:
+  - review-service p95/p99 latency rises sharply after the rollout at unchanged request rate
+  - Node.js event-loop lag/utilization spikes; a single CPU core saturates (single-threaded)
+  - latency grows with concurrency (requests serialize behind the blocking loop), not with DB time
+  - MongoDB stays healthy — query latency and server load are flat; the bottleneck is in-process CPU
+  - onset correlates exactly with the review-service rollout; rolling back restores latency

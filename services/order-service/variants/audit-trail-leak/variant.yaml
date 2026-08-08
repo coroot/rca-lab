@@ -1,0 +1,20 @@
+name: audit-trail-leak
+tag: "1.4.0"
+summary: >
+  A new "access audit trail" for the compliance report records a batch of
+  fine-grained access entries into a process-wide registry on every order read,
+  but nothing ever prunes or flushes it. Unlike the fast crash-leak in 1.3.0
+  (a few very large objects that exhaust the heap in minutes), this leaks a
+  huge number of *small* objects: the live set grows into the millions, so the
+  JVM must trace an ever-larger object graph on every collection. Old-gen
+  occupancy creeps up while G1 mark and mixed-collection time and frequency
+  rise, and order-service latency degrades gradually — a performance regression
+  that shows up well before the heap is ever exhausted. A genuine memory leak
+  introduced by a new version that manifests as slow degradation, not an
+  immediate OOM.
+expected_symptoms:
+  - order-service p95/p99 latency creeps up gradually after the rollout (not a step change, not a crash)
+  - JVM live-set / old-gen occupancy trends upward; heap baseline after each GC keeps rising
+  - GC time fraction and mixed/old-gen collection frequency increase; pauses lengthen as the live set grows
+  - object/instance counts climb into the millions; no single large allocation — many small retained objects
+  - MySQL, Kafka and downstreams stay healthy; onset correlates exactly with the order-service rollout; rollback restores latency

@@ -1,0 +1,48 @@
+# A genuine bad deploy: order-service 1.4.0 is the audit-trail-leak variant
+# (services/order-service/variants/audit-trail-leak/) — a new compliance
+# "access audit trail" retains a batch of small objects on every read into a
+# process-wide registry that is never pruned. It leaks millions of tiny live
+# objects, so GC tracing cost grows and latency degrades gradually (as opposed
+# to the fast OOM crash-leak in order-service-gc-regression / 1.3.0). The
+# rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: order-service-memory-leak
+  namespace: default
+spec:
+  displayName: "Bad deploy: order-service slow memory leak (performance)"
+  description: >-
+    order-service rolls out version 1.4.0, which records a compliance
+    "access audit trail" — a batch of small entries appended to a process-wide
+    registry on every order read, never pruned. Rather than a few large objects
+    that exhaust the heap in minutes, this accumulates millions of tiny live
+    objects: old-gen occupancy creeps up, the JVM must trace an ever-larger live
+    set on every collection, GC time and mixed-collection frequency rise, and
+    p99 latency degrades gradually — a performance regression that appears long
+    before the heap is exhausted. Reverting rolls the Deployment back to the
+    known-good image.
+  category: deploy
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - order-service p95/p99 latency creeps up gradually after the rollout (not a step change, not a crash)
+    - JVM live-set / old-gen occupancy trends upward; post-GC heap baseline keeps rising
+    - GC time fraction and mixed/old-gen collection frequency increase; pauses lengthen as the live set grows
+    - object/instance counts climb into the millions; many small retained objects, no single large allocation
+    - MySQL, Kafka and downstreams stay healthy; onset correlates exactly with the rollout; rollback restores latency
+  actions:
+    - name: roll-out-slow-leak
+      type: DeployImage
+      deployImage:
+        targetRef:
+          kind: Deployment
+          name: order-service
+        container: order-service
+        # The regression image (a bad-deploy variant). Its tag is declared in
+        # services/order-service/variants/audit-trail-leak/variant.yaml and
+        # recorded in variants/registry.yaml.
+        image: ghcr.io/coroot/rca-lab/order-service:1.4.0
+        # knownGoodImage is intentionally omitted: the operator records the
+        # image order-service is actually running at activation and rolls
+        # back to exactly that, so the rollback target never drifts.

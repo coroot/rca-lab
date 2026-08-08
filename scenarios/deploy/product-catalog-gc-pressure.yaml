@@ -1,0 +1,46 @@
+# A genuine bad deploy: product-catalog 1.1.0 is the gc-pressure variant
+# (services/product-catalog/variants/gc-pressure/) — the storefront redesign's
+# server-side "product cards" re-encode every returned product into large,
+# short-lived scratch buffers on every read path. Nothing is retained (no leak),
+# but the allocation rate explodes and the Go GC runs almost continuously. The
+# rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: product-catalog-gc-pressure
+  namespace: default
+spec:
+  displayName: "Bad deploy: product-catalog GC (allocation) pressure"
+  description: >-
+    product-catalog rolls out version 1.1.0, which renders server-side product
+    cards by re-encoding each returned product once per responsive breakpoint
+    into large scratch buffers that are discarded when the request returns.
+    Heap in-use stays bounded (there is no leak), but the allocation rate jumps
+    and the Go garbage collector runs almost continuously: the pods burn CPU in
+    GC, saturate their CPU limit, and read latency climbs — degradation that
+    propagates up to the api-gateway. Reverting rolls the Deployment back to the
+    known-good image.
+  category: deploy
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - product-catalog GC CPU fraction and GC frequency rise sharply after the rollout
+    - Go allocation rate jumps; heap in-use stays bounded (no leak, no OOM)
+    - product-catalog CPU saturates toward its limit and throttles; read p95/p99 rise
+    - api-gateway latency for catalog-backed endpoints rises at unchanged request rate
+    - PostgreSQL and downstreams stay healthy; onset correlates exactly with the rollout
+  actions:
+    - name: roll-out-gc-pressure
+      type: DeployImage
+      deployImage:
+        targetRef:
+          kind: Deployment
+          name: product-catalog
+        container: product-catalog
+        # The regression image (a bad-deploy variant). Its tag is declared in
+        # services/product-catalog/variants/gc-pressure/variant.yaml and
+        # recorded in variants/registry.yaml.
+        image: ghcr.io/coroot/rca-lab/product-catalog:1.1.0
+        # knownGoodImage is intentionally omitted: the operator records the
+        # image product-catalog is actually running at activation and rolls
+        # back to exactly that, so the rollback target never drifts.

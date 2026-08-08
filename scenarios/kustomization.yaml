@@ -5,7 +5,10 @@ resources:
   - database/pg-analytics-queries.yaml
   - database/mysql-analytics-queries.yaml
   - deploy/order-service-gc-regression.yaml
+  - deploy/order-service-memory-leak.yaml
+  - deploy/product-catalog-gc-pressure.yaml
   - deploy/recommendation-memory-leak.yaml
+  - deploy/review-service-event-loop.yaml
   - infra/traffic-spike.yaml
   - infra/cpu-noisy-neighbor.yaml
   - network/network-delay-product-catalog.yaml

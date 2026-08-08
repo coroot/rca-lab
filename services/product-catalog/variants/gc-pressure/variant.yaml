@@ -1,0 +1,17 @@
+name: gc-pressure
+tag: "1.1.0"
+summary: >
+  The storefront redesign added server-side "product cards": every read path
+  (list, category, search, product detail) re-encodes each returned product
+  once per responsive breakpoint into large scratch buffers that are discarded
+  when the request returns. Nothing is retained — there is no leak — but the
+  allocation rate explodes under normal read traffic, so the Go garbage
+  collector runs almost continuously. product-catalog pods burn their CPU in
+  GC and their read latency climbs; the degradation propagates up to the
+  api-gateway. Pure GC (allocation) pressure from a new release, not a leak.
+expected_symptoms:
+  - product-catalog GC CPU fraction and GC cycle frequency rise sharply after the rollout
+  - Go allocation rate (bytes/heap objects allocated per second) jumps; heap in-use stays bounded (no leak, no OOM)
+  - product-catalog CPU saturates toward its limit and throttles; read p95/p99 latency rises
+  - api-gateway latency for catalog-backed endpoints rises with unchanged request rate
+  - PostgreSQL and all downstreams stay healthy; onset correlates exactly with the product-catalog rollout

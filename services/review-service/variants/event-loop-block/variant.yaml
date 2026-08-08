@@ -1,5 +1,5 @@
 name: event-loop-block
-tag: "1.1.0"
+tag: "1.2.0"
 summary: >
   A new "content safety" feature scans every review list for profanity and PII
   before returning it — but it shipped as a synchronous, pure-CPU loop that runs

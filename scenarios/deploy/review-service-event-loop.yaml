@@ -39,7 +39,7 @@ spec:
         # The regression image (a bad-deploy variant). Its tag is declared in
         # services/review-service/variants/event-loop-block/variant.yaml and
         # recorded in variants/registry.yaml.
-        image: ghcr.io/coroot/rca-lab/review-service:1.1.0
+        image: ghcr.io/coroot/rca-lab/review-service:1.2.0
         # knownGoodImage is intentionally omitted: the operator records the
         # image review-service is actually running at activation and rolls
         # back to exactly that, so the rollback target never drifts.

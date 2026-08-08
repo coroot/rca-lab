@@ -81,7 +81,7 @@ variants:
   - product-catalog and api-gateway see recommendation gRPC errors/timeouts during
     the restarts
   - symptom onset correlates exactly with the recommendation-service deployment rollout
-- image: ghcr.io/coroot/rca-lab/review-service:1.1.0
+- image: ghcr.io/coroot/rca-lab/review-service:1.2.0
   service: review-service
   variant: event-loop-block
   summary: "A new \"content safety\" feature scans every review list for profanity\

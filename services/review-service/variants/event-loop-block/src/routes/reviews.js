@@ -15,7 +15,9 @@ const router = express.Router();
 // release (should have run in a worker thread or offline).
 function contentSafetyScanSync() {
   // Fixed synchronous CPU budget (~tens of ms) executed on the event loop.
-  const ROUNDS = 14_000_000;
+  // Sized so that, at the lab's normal review read rate, the blocking work
+  // alone saturates the single event-loop thread — the whole point of the bug.
+  const ROUNDS = 60_000_000;
   let acc = 0x811c9dc5 | 0;
   for (let i = 0; i < ROUNDS; i++) {
     acc = (Math.imul(acc ^ i, 2654435761) + (acc >>> 15)) | 0;

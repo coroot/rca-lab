@@ -8,7 +8,12 @@ ARG VARIANT=""
 RUN if [ -n "$VARIANT" ]; then cp -rf variants/$VARIANT/src/. ./src/; fi
 RUN mvn package -DskipTests -B
 
-FROM eclipse-temurin:21-jre-alpine
+# glibc-based JRE (not -alpine/musl): the Kafka client's snappy-java unpacks a
+# glibc-linked native lib (libsnappyjava.so) to decompress snappy-compressed
+# record batches. On Alpine/musl it fails to load (UnsatisfiedLinkError: missing
+# ld-linux-x86-64.so.2), which surfaces as a fatal, unskippable consumer-fetch
+# exception that Spring Kafka retries forever — pegging CPU and flooding logs.
+FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # OpenTelemetry Java agent, pinned to v2.30.0

@@ -55,19 +55,37 @@ spec:
           cpu: 50m
           memory: 64Mi
   # The operator requires spec.backups. This lab keeps backups entirely
-  # in-cluster (a PVC-backed pgBackRest repo, no schedules, no object
-  # storage) so it needs no cloud credentials.
+  # in-cluster (a PVC-backed pgBackRest repo, no object storage) so it needs no
+  # cloud credentials. pgBackRest archives WAL continuously, and it can only
+  # expire archived WAL that predates a retained backup — so it MUST have a
+  # backup and a retention policy, or the repo fills with WAL forever. Keep a
+  # single daily full backup (retention 1); expire then prunes older WAL.
   backups:
     pgbackrest:
       image: docker.io/percona/percona-pgbackrest:2.58.0-1
+      global:
+        repo1-retention-full: "1"
+        repo1-retention-full-type: count
+        # Force an immediate checkpoint at backup start instead of waiting up to
+        # checkpoint_timeout (~5 min) for the next one.
+        start-fast: "y"
+      manual:
+        repoName: repo1
+        options:
+          - --type=full
       repos:
         - name: repo1
+          schedules:
+            full: "0 3 * * *"
           volume:
             volumeClaimSpec:
               accessModes: [ReadWriteOnce]
               resources:
+                # 15Gi (not 5Gi): headroom to write the first full backup while
+                # the pre-retention WAL backlog is still present; expire reclaims
+                # it afterward, and steady state is ~1 backup + ~1 day of WAL.
                 requests:
-                  storage: 5Gi
+                  storage: 15Gi
   users:
     # Superuser used only by Coroot for database monitoring (reads
     # pg_stat_statements, pg_stat_activity, replication state). The operator

@@ -17,12 +17,14 @@ spec:
     image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
     # Coroot database monitoring: scrape each PXC node as the operator's
     # built-in 'monitor' user (created for remote monitoring; password in the
-    # Secret mysql-secrets, key 'monitor'). tls value is provisional — verified
-    # against the live cluster at rollout (PXC serves TLS by default).
+    # Secret mysql-secrets, key 'monitor'). PXC serves TLS with an operator-
+    # generated cert that has no IP SANs, and Coroot connects by pod IP, so use
+    # 'skip-verify' (encrypt without validating the cert) rather than 'true'
+    # (which would fail cert verification).
     annotations:
       coroot.com/mysql-scrape: "true"
       coroot.com/mysql-scrape-port: "3306"
-      coroot.com/mysql-scrape-param-tls: "true"
+      coroot.com/mysql-scrape-param-tls: "skip-verify"
       coroot.com/mysql-scrape-credentials-username: "monitor"
       coroot.com/mysql-scrape-credentials-secret-name: "mysql-secrets"
       coroot.com/mysql-scrape-credentials-secret-password-key: "monitor"

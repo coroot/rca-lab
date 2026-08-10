@@ -17,6 +17,15 @@ spec:
   replsets:
     - name: rs0
       size: 3
+      # Coroot database monitoring: scrape each replica-set member as the
+      # operator's built-in clusterMonitor user (credentials in the Secret
+      # internal-mongodb-users).
+      annotations:
+        coroot.com/mongodb-scrape: "true"
+        coroot.com/mongodb-scrape-port: "27017"
+        coroot.com/mongodb-scrape-credentials-secret-name: "internal-mongodb-users"
+        coroot.com/mongodb-scrape-credentials-secret-username-key: "MONGODB_CLUSTER_MONITOR_USER"
+        coroot.com/mongodb-scrape-credentials-secret-password-key: "MONGODB_CLUSTER_MONITOR_PASSWORD"
       configuration: |
         storage:
           wiredTiger:

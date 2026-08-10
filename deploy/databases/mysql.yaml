@@ -15,6 +15,17 @@ spec:
   pxc:
     size: 3
     image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
+    # Coroot database monitoring: scrape each PXC node as the operator's
+    # built-in 'monitor' user (created for remote monitoring; password in the
+    # Secret mysql-secrets, key 'monitor'). tls value is provisional — verified
+    # against the live cluster at rollout (PXC serves TLS by default).
+    annotations:
+      coroot.com/mysql-scrape: "true"
+      coroot.com/mysql-scrape-port: "3306"
+      coroot.com/mysql-scrape-param-tls: "true"
+      coroot.com/mysql-scrape-credentials-username: "monitor"
+      coroot.com/mysql-scrape-credentials-secret-name: "mysql-secrets"
+      coroot.com/mysql-scrape-credentials-secret-password-key: "monitor"
     resources:
       requests:
         cpu: 500m

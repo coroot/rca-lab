@@ -15,6 +15,15 @@ spec:
   pxc:
     size: 3
     image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
+    configuration: |
+      [mysqld]
+      # Keep binary logs bounded. The lab has no external async replicas, and PXC
+      # uses its gcache (not binlogs) for node recovery, so a short retention is
+      # safe. The 30-day default (binlog_expire_logs_seconds=2592000) fills the
+      # 8Gi volume in ~2 days at the lab's write rate. Smaller max_binlog_size
+      # makes files rotate (and become eligible for expiry) promptly.
+      binlog_expire_logs_seconds = 3600
+      max_binlog_size = 268435456
     # Coroot database monitoring: scrape each PXC node as the operator's
     # built-in 'monitor' user (created for remote monitoring; password in the
     # Secret mysql-secrets, key 'monitor'). PXC serves TLS with an operator-

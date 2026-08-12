@@ -1,7 +1,8 @@
 # Template for the otel-collector-config ConfigMap. scripts/deploy.sh
-# substitutes __EXPORTERS__ and __EXPORTER_NAME__:
-#   default:            nop exporter (discard everything)
-#   OTLP_ENDPOINT set:  otlp exporter pointed at it
+# substitutes __EXPORTERS__ and the per-signal __{TRACES,METRICS,LOGS}_EXPORTER__:
+#   default:            every signal -> nop exporter (discard everything)
+#   OTLP_ENDPOINT set:  signals listed in OTLP_SIGNALS -> otlp, the rest -> nop
+#                       (e.g. OTLP_SIGNALS=traces sends only traces, drops the rest)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,12 +36,12 @@ __EXPORTERS__
         traces:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [__EXPORTER_NAME__]
+          exporters: [__TRACES_EXPORTER__]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [__EXPORTER_NAME__]
+          exporters: [__METRICS_EXPORTER__]
         logs:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [__EXPORTER_NAME__]
+          exporters: [__LOGS_EXPORTER__]

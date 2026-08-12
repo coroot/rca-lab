@@ -8,7 +8,16 @@
 #   OTLP_ENDPOINT   forward telemetry via OTLP, e.g. coroot.example:4317
 #                   (default: telemetry is received and discarded)
 #   OTLP_INSECURE   set to 0 if the OTLP endpoint uses TLS (default: 1, plaintext)
-#   OTLP_HEADERS    optional exporter headers, e.g. "x-api-key=abc"
+#   OTLP_HEADERS    optional exporter headers (auth), comma-separated key=value.
+#                   The header your backend needs, e.g.:
+#                     Coroot      OTLP_HEADERS="x-api-key=<project-key>"
+#                     Grafana     OTLP_HEADERS="authorization=Basic <base64>"
+#                     Honeycomb   OTLP_HEADERS="x-honeycomb-team=<key>"
+#                     New Relic   OTLP_HEADERS="api-key=<license-key>"
+#                     generic     OTLP_HEADERS="authorization=Bearer <token>"
+#   OTLP_SIGNALS    which signals to forward, comma-separated subset of
+#                   traces,metrics,logs (default: all). Unlisted signals are
+#                   dropped. e.g. Coroot ingests traces via OTLP: OTLP_SIGNALS=traces
 #   YES=1           skip the kube-context confirmation prompt
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,6 +28,7 @@ SEED_SIZE_GB="${SEED_SIZE_GB:-0.5}"
 OTLP_ENDPOINT="${OTLP_ENDPOINT:-}"
 OTLP_INSECURE="${OTLP_INSECURE:-1}"
 OTLP_HEADERS="${OTLP_HEADERS:-}"
+OTLP_SIGNALS="${OTLP_SIGNALS:-traces,metrics,logs}"
 YES="${YES:-}"
 
 PG_OPERATOR_CHART=3.0.0
@@ -172,11 +182,15 @@ mysql_init() {
 }
 
 apply_otel() {
-    info "Configuring otel-collector (destination: ${OTLP_ENDPOINT:-discard})"
-    local exporters exporter_name
+    info "Configuring otel-collector (destination: ${OTLP_ENDPOINT:-discard}${OTLP_ENDPOINT:+, signals: ${OTLP_SIGNALS}})"
+    # nop is always defined so any signal can be dropped independently; otlp is
+    # added only when a destination is set. Each pipeline points at otlp (if its
+    # signal is selected) or nop (dropped).
+    local exporters traces_exp=nop metrics_exp=nop logs_exp=nop
+    exporters="      nop: {}"
     if [ -n "$OTLP_ENDPOINT" ]; then
-        exporter_name=otlp
-        exporters="      otlp:
+        exporters="$exporters
+      otlp:
         endpoint: ${OTLP_ENDPOINT}"
         if [ "$OTLP_INSECURE" = 1 ]; then
             exporters="$exporters
@@ -194,13 +208,27 @@ apply_otel() {
           ${key}: \"${val}\""
             done
         fi
-    else
-        exporter_name=nop
-        exporters="      nop: {}"
+        # Route selected signals to otlp; anything not listed stays on nop.
+        local s
+        IFS=',' read -ra sigs <<< "$OTLP_SIGNALS"
+        for s in "${sigs[@]}"; do
+            case "$(echo "$s" | tr -d '[:space:]')" in
+                traces)  traces_exp=otlp ;;
+                metrics) metrics_exp=otlp ;;
+                logs)    logs_exp=otlp ;;
+                "")      ;;
+                *)       warn "OTLP_SIGNALS: ignoring unknown signal '$s' (expected traces, metrics, or logs)" ;;
+            esac
+        done
     fi
-    awk -v exporters="$exporters" -v name="$exporter_name" \
-        '{gsub(/__EXPORTER_NAME__/, name); if ($0 ~ /^__EXPORTERS__$/) print exporters; else print}' \
-        deploy/otel/collector-config.tmpl.yaml | kubectl apply -f -
+    # Substitute via a temp file for the (multi-line) exporters block: passing a
+    # value with newlines through `awk -v` fails on BSD/macOS awk.
+    local expfile; expfile="$(mktemp)"; printf '%s\n' "$exporters" > "$expfile"
+    awk -v t="$traces_exp" -v m="$metrics_exp" -v l="$logs_exp" -v expfile="$expfile" '
+        $0 == "__EXPORTERS__" { while ((getline line < expfile) > 0) print line; close(expfile); next }
+        { gsub(/__TRACES_EXPORTER__/, t); gsub(/__METRICS_EXPORTER__/, m); gsub(/__LOGS_EXPORTER__/, l); print }
+    ' deploy/otel/collector-config.tmpl.yaml | kubectl apply -f -
+    rm -f "$expfile"
     kubectl apply -k deploy/otel
     kubectl rollout restart deployment/otel-collector -n default >/dev/null
     kubectl rollout status deployment/otel-collector -n default --timeout=2m
@@ -292,11 +320,18 @@ summary() {
 rca-lab is up.
 
   Traffic:    load-generator -> api-gateway -> services (continuous)
-  Telemetry:  all services -> otel-collector (${OTLP_ENDPOINT:-discarded; set OTLP_ENDPOINT=host:4317 to forward})
+  Telemetry:  all services -> otel-collector, ${OTLP_ENDPOINT:+forwarding ${OTLP_SIGNALS} to ${OTLP_ENDPOINT}}${OTLP_ENDPOINT:-discarding (set OTLP_ENDPOINT=host:4317 to forward)}
   Scenarios:  kubectl get failurescenarios   (web UI: kubectl port-forward svc/rca-lab-operator 8080)
   Status:     make status
 EOF
 }
+
+# `deploy.sh otel` reconfigures only the otel-collector (fast iteration on the
+# telemetry destination / headers / signals) without touching the rest.
+if [ "${1:-}" = otel ]; then
+    apply_otel
+    exit 0
+fi
 
 preflight
 install_operators

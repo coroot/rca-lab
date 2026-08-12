@@ -1,0 +1,57 @@
+# A "schema-migration" transaction takes an ACCESS EXCLUSIVE lock on the
+# products table and then stalls (idle in transaction) — the classic "a
+# migration grabbed the lock and hung" incident. The lock is real (LOCK TABLE,
+# exactly what a migration issues first); the stall is a pg_sleep standing in
+# for a migration blocked on a slow step. PostgreSQL does no work while it holds
+# the lock, so the tell is lock waits, not resource saturation.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-exclusive-lock
+  namespace: default
+spec:
+  displayName: Stalled migration holding an exclusive lock on products
+  description: >-
+    A "schema-migration" transaction acquires an ACCESS EXCLUSIVE lock on the
+    products table and then stalls, holding the lock without doing any work.
+    Every product-catalog query on products blocks waiting for the lock; the
+    service's connection pool fills with waiting queries and product-catalog
+    becomes unavailable, so api-gateway product endpoints time out. PostgreSQL
+    itself is idle — no query is executing — so its CPU and IO stay flat and the
+    only signal is lock waits (pg_locks / pg_stat_activity). Reverting terminates
+    the stalled session, which releases the lock; everything recovers at once.
+  category: database
+  severity: high
+  duration: 10m
+  expectedSymptoms:
+    - product-catalog queries on the products table block on lock acquisition; latency spikes and requests time out at unchanged request rate
+    - product-catalog's DB connection pool saturates with waiting queries and the service goes unavailable; api-gateway product endpoints error/time out
+    - PostgreSQL CPU and IO stay LOW/flat — no query is executing; the failure is lock contention, not resource saturation
+    - pg_stat_activity shows sessions in a Lock wait blocked by a "schema-migration" session that holds ACCESS EXCLUSIVE on products while stalled (doing nothing — a PgSleep wait); pg_blocking_pids identifies the culprit
+    - onset and full recovery correlate exactly with the start and termination of the stalled lock-holder session
+  actions:
+    - name: schema-migration
+      type: Workload
+      workload:
+        name: schema-migration
+        engine: postgres
+        concurrency: 1
+        interval: 10s
+        env:
+          # Direct primary connection (a migration connects to the DB, not
+          # through pgBouncer), so the exclusive lock is held on a real backend
+          # and no pooler timeout cuts it short.
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          # Acquire ACCESS EXCLUSIVE on products and hold it while the migration
+          # "stalls". lib/pq runs a 0-arg query via the simple protocol, so this
+          # multi-statement string executes as one transaction on one connection:
+          # the lock is held from LOCK until COMMIT (i.e. for the whole pg_sleep).
+          # The sleep is longer than the scenario duration, so the operator's
+          # dead-man deadline (or a manual revert) terminates the session first,
+          # which rolls back the transaction and releases the lock at once.
+          - "BEGIN; LOCK TABLE products IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(1800); COMMIT;"

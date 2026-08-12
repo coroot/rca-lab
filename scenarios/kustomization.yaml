@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: default
 resources:
   - database/pg-analytics-queries.yaml
+  - database/pg-exclusive-lock.yaml
   - database/mysql-analytics-queries.yaml
   - deploy/order-service-gc-regression.yaml
   - deploy/order-service-memory-leak.yaml

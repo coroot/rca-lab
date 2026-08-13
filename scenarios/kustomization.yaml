@@ -12,4 +12,5 @@ resources:
   - deploy/review-service-event-loop.yaml
   - infra/traffic-spike.yaml
   - infra/cpu-noisy-neighbor.yaml
+  - network/dns-slow-resolution.yaml
   - network/network-delay-product-catalog.yaml

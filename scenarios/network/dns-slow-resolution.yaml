@@ -1,0 +1,57 @@
+# Degraded DNS resolution: Chaos Mesh adds latency to the app tier's traffic to
+# the cluster DNS service, so every DNS lookup the services make is slow. This is
+# a real network condition on the DNS path (not fabricated DNS answers) — the
+# same mechanism as network-delay, pointed at the resolver. Services front-load a
+# slow lookup on each new connection, so their egress gets intermittently slow
+# while every dependency is perfectly healthy: the classic "it's always DNS"
+# incident. The tell is DNS query latency (Coroot's DNS view), not any single hop.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: dns-slow-resolution
+  namespace: default
+spec:
+  displayName: Degraded DNS resolution (slow name lookups)
+  description: >-
+    Chaos Mesh adds ~500ms (±100ms) of latency to the app services' packets to
+    the cluster DNS service, so every DNS lookup they make becomes slow. Because a
+    client resolves a name on each new connection, services see intermittent
+    latency spikes across all of their outbound calls — to databases and to other
+    services alike — even though every dependency's own CPU, query time and error
+    rate stay flat, and connections that are kept alive are unaffected. Nothing is
+    wrong with any single service; the shared cause is slow name resolution.
+    Reverting removes the delay and resolution latency returns to normal at once.
+  category: network
+  severity: high
+  duration: 10m
+  expectedSymptoms:
+    - DNS query latency for the app services rises sharply (~500ms per lookup) while CoreDNS's own CPU stays flat — the delay is on the network path to it, not in CoreDNS
+    - many services show intermittent p95/p99 spikes on outbound calls, correlated with new-connection setup rather than with any dependency's load
+    - each dependency (databases, services) is healthy — flat CPU, query time and error rate; services that reuse connections are affected least
+    - the common factor is name resolution, not any one hop; the spikes track DNS latency
+    - onset and recovery correlate with the DNS latency, not with any deploy or traffic change
+  actions:
+    - name: slow-dns
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: delay
+          mode: all
+          # Apply the delay to the app pods' egress toward the DNS service, not to
+          # CoreDNS itself: CoreDNS is in kube-system and Chaos Mesh's auth webhook
+          # forbids a default-namespace actor from targeting it. externalTargets is
+          # an IP/host (not a namespaced selector), so there's no cross-namespace
+          # restriction, and the app pod's tc sees the DNS ClusterIP pre-DNAT so it
+          # matches. CoreDNS serves only DNS, so this stays scoped to DNS traffic.
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              part-of: rca-lab
+          externalTargets:
+            - kube-dns.kube-system.svc.cluster.local
+          direction: to
+          delay:
+            latency: "500ms"
+            jitter: "100ms"
+            correlation: "50"

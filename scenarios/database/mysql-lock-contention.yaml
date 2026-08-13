@@ -1,0 +1,57 @@
+# A stalled transaction holds InnoDB row locks on the hot end of the orders
+# table (SELECT ... FOR UPDATE) and then hangs without committing — the classic
+# "a transaction grabbed row locks and stalled" incident. Unlike Postgres's
+# table-level ACCESS EXCLUSIVE, InnoDB is row-level MVCC: reads keep working
+# (snapshot reads), but writes to the locked rows/gaps block and eventually fail
+# with "Lock wait timeout exceeded". MySQL itself does no work while it holds the
+# locks, so the tell is lock waits, not resource saturation.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mysql-lock-contention
+  namespace: default
+spec:
+  displayName: Stalled transaction holding row locks on orders
+  description: >-
+    A transaction takes InnoDB row locks on the most recent orders
+    (SELECT ... FOR UPDATE, including the gap above the max id) and then stalls,
+    holding them. order-service reads of orders still succeed (InnoDB serves
+    snapshot reads), but writes — creating new orders and updating order status
+    on fulfillment — block on the locked rows/gap and fail with
+    "Lock wait timeout exceeded" after innodb_lock_wait_timeout (50s). PXC CPU
+    and IO stay flat; nothing is executing, the transaction is just sitting on
+    the locks. Reverting terminates the session, which rolls the transaction
+    back and releases the locks at once.
+  category: database
+  severity: high
+  duration: 10m
+  expectedSymptoms:
+    - order-service checkout/fulfillment writes to orders block and then error with "Lock wait timeout exceeded" (50s); order reads still succeed
+    - PXC CPU and IO stay LOW/flat — nothing is executing; the failure is row-lock contention, not resource saturation
+    - information_schema.innodb_trx shows one long-running transaction sitting idle; performance_schema.data_lock_waits / SHOW ENGINE INNODB STATUS show writers blocked by it
+    - the blocking session is a stalled transaction holding FOR UPDATE locks on the orders table (a "User sleep" in SHOW PROCESSLIST), not a heavy query
+    - onset and full recovery correlate exactly with the start and termination of the stalled lock-holder session
+  actions:
+    - name: stalled-txn
+      type: Workload
+      workload:
+        name: stalled-txn
+        engine: mysql
+        concurrency: 1
+        interval: 10s
+        env:
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-custom-user-secret
+                key: orders
+          # multiStatements=true so the whole transaction runs on one connection.
+          - name: DATABASE_URL
+            value: orders:$(MYSQL_PASSWORD)@tcp(mysql-haproxy:3306)/orders?parseTime=true&multiStatements=true
+        queries:
+          # Lock the most-recent orders and the gap above them (which blocks new
+          # INSERTs), then stall. A single connection holds the transaction — and
+          # the row locks — for the whole SLEEP; the sleep is longer than the
+          # scenario, so the operator's dead-man deadline (or a manual revert)
+          # terminates the session first, rolling back and releasing the locks.
+          - "BEGIN; SELECT id FROM orders ORDER BY id DESC LIMIT 500 FOR UPDATE; DO SLEEP(1800); COMMIT;"

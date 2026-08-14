@@ -51,10 +51,15 @@ spec:
             labelSelectors:
               postgres-operator.crunchydata.com/cluster: pg
               postgres-operator.crunchydata.com/role: replica
-          direction: both
+          # Egress-only delay on the standby: Chaos Mesh's netem webhook forbids
+          # `both`/`from` without an explicit target, and `to` needs none. Delaying
+          # the replica's outgoing packets (its streaming-replication feedback and
+          # TCP ACKs) throttles the primary's WAL sender via flow control, so the
+          # standby falls behind under write load.
+          direction: to
           delay:
-            latency: "800ms"
-            jitter: "200ms"
+            latency: "300ms"
+            jitter: "60ms"
             correlation: "50"
     # 2. Generate WAL on the primary so the throttled standby has volume to fall
     #    behind on. Autovacuum stays on; the churn is a no-op rewrite (reversible).
@@ -64,7 +69,7 @@ spec:
       workload:
         name: wal-writer
         engine: postgres
-        concurrency: 2
+        concurrency: 1
         interval: 1s
         env:
           - name: DATABASE_URL

@@ -73,6 +73,11 @@ or use the web UI:
 kubectl port-forward svc/rca-lab-operator 8080
 ```
 
+![rca-lab scenario library UI — scenarios grouped by category with severity and live state](docs/images/scenarios-ui.png)
+
+The UI lists every scenario grouped by category, with severity and live state, and
+starts or stops each one with a click.
+
 Each scenario documents its mechanism and the telemetry symptoms an RCA tool
 should be able to observe. Scenarios can also run on a cron schedule with a
 fixed duration — see `scenarios/`.

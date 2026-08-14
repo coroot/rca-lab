@@ -55,5 +55,6 @@ spec:
           - "UPDATE products SET category = 'STALE:' || category WHERE id % 10 = 0 AND category NOT LIKE 'STALE:%'"
         revert:
           - "UPDATE products SET category = substring(category from 7) WHERE category LIKE 'STALE:%'"
-          - "ALTER TABLE products SET (autovacuum_enabled = true)"
+          # RESET (not SET true) restores the exact original state — no reloption.
+          - "ALTER TABLE products RESET (autovacuum_enabled)"
           - "ANALYZE products"

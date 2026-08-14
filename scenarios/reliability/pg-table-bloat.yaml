@@ -47,7 +47,9 @@ spec:
         ensure:
           - "ALTER TABLE products SET (autovacuum_enabled = false, toast.autovacuum_enabled = false)"
         revert:
-          - "ALTER TABLE products SET (autovacuum_enabled = true, toast.autovacuum_enabled = true)"
+          # RESET (not SET true) restores the exact original state — no reloption
+          # at all — and is a no-op if Ensure never ran.
+          - "ALTER TABLE products RESET (autovacuum_enabled, toast.autovacuum_enabled)"
           - "ANALYZE products"
     # 2. Churn a hot window of rows so dead tuples accumulate. Updating the
     #    GIN-indexed name column forces non-HOT updates (heap + index bloat).

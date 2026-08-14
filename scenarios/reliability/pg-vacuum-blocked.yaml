@@ -34,9 +34,11 @@ spec:
     - terminating the stalled transaction (revert) lets the horizon advance and autovacuum reclaims the accumulated dead tuples
   actions:
     # 1. The stalled reporting transaction: REPEATABLE READ takes a snapshot at
-    #    the first query and holds it. pg_sleep outlives the run, so the Job's
-    #    deadline (or a manual revert) drops the connection, rolling it back and
-    #    releasing the horizon.
+    #    the first query and holds it. It tags its session with a distinctive
+    #    application_name so revert (action 3) can terminate it deterministically.
+    #    pg_sleep outlives the run; a sleeping backend does no socket IO, so it
+    #    will NOT notice its client pod dying — deleting the Job is not enough to
+    #    release the snapshot, which is why action 3 explicitly kills it.
     - name: reporting-snapshot
       type: Workload
       workload:
@@ -51,7 +53,7 @@ spec:
                 name: pg-pguser-products
                 key: uri
         queries:
-          - "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(1800);"
+          - "SET application_name = 'rca-lab-vacuum-holder'; BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(1800);"
     # 2. Churn a hot window so dead tuples are generated for autovacuum to (fail
     #    to fully) reclaim while the horizon is pinned. Autovacuum stays enabled.
     - name: row-rewriter
@@ -70,3 +72,23 @@ spec:
                 key: uri
         queries:
           - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 5000"
+    # 3. Deterministic release. This action mutates nothing on activation (its
+    #    ensure is a no-op probe); its whole purpose is the revert, which
+    #    terminates the stalled holder session by application_name — reverts LIFO,
+    #    so this runs first and releases the xmin horizon at once. Idempotent: it
+    #    matches zero rows if the holder is already gone.
+    - name: release-holder
+      type: DBExec
+      dbExec:
+        name: release-holder
+        engine: postgres
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        ensure:
+          - "SELECT 1"
+        revert:
+          - "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'rca-lab-vacuum-holder' AND pid <> pg_backend_pid()"

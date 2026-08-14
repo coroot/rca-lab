@@ -33,7 +33,7 @@ spec:
     - Postgres replication lag for the standby grows over the run (bytes behind primary and replay lag in seconds) while the primary stays healthy
     - the replica's WAL replay / receive falls behind; reads served by the replica return increasingly stale data
     - the primary shows normal commit throughput and no error rate — the problem is isolated to the standby's ability to keep up, i.e. the replica, not the writes
-    - the tell is on the network path to the replica (latency), not the database engine: the standby's own CPU and disk are not saturated
+    - the tell is on the network path to the replica (latency), not the database engine — the standby's own CPU and disk are not saturated
     - onset and recovery track the injected latency; removing it lets the replica replay the backlog and lag returns to ~0
   actions:
     # 1. Degrade the current standby's network (selected by role=replica so it

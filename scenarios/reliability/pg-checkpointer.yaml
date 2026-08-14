@@ -36,7 +36,7 @@ spec:
     - WAL generation rate is far above baseline, and checkpoint write_time / sync_time and buffers written by the checkpointer rise with it
     - full-page writes amplify WAL right after each checkpoint, feeding the loop; Postgres may log "checkpoints are occurring too frequently"
     - foreground write latency on the primary gets choppy and IO utilization climbs, while the workload's own query rate stays constant — the cost is checkpoint/WAL IO, not the queries themselves
-    - onset and recovery track the batch job: stopping it (revert) returns checkpoints to the timed cadence and WAL rate to baseline
+    - onset and recovery track the batch job — stopping it (revert) returns checkpoints to the timed cadence and WAL rate to baseline
   actions:
     # A write-heavy, WAL-generating batch. Non-HOT updates (the name column is
     # GIN-indexed) write both heap and index WAL. Fully reversible — it rewrites

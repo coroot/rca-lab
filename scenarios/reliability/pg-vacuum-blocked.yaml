@@ -27,7 +27,7 @@ spec:
   severity: high
   duration: 30m
   expectedSymptoms:
-    - a very old transaction is open (pg_stat_activity: large xact_start age; backend_xmin held) — a REPEATABLE READ session that took a snapshot and never committed
+    - a very old transaction is open (pg_stat_activity shows a large xact_start age and a held backend_xmin) — a REPEATABLE READ session that took a snapshot and never committed
     - dead tuples on public.products climb even though autovacuum runs successfully (last_autovacuum stays recent) — vacuum can't remove tuples newer than the held snapshot
     - the oldest-snapshot / xmin horizon (age(backend_xmin), and over time datfrozenxid age) stops advancing while the transaction is held
     - no query is blocked and CPU/IO look normal — this is not lock contention; the risk is the frozen horizon, which is easy to miss

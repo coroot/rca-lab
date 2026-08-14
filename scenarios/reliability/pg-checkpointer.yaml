@@ -1,0 +1,58 @@
+# A write-heavy batch job generates WAL far faster than normal, so Postgres is
+# forced to checkpoint on volume (max_wal_size) rather than on the timer —
+# checkpoints start happening "too frequently." Each checkpoint flushes a burst
+# of dirty buffers and, right after it, every first-touched page is written to
+# WAL in full (full-page writes), so WAL volume and write IO amplify each other.
+# This is a reliability/tuning risk: the database keeps working, but it spends a
+# growing share of its IO budget on checkpoint and WAL writes, foreground latency
+# gets choppy, and the checkpointer is a smoking gun that checkpoint settings are
+# mismatched to the write rate. A good tool should surface the rising checkpoint
+# frequency and WAL rate. Reverting stops the batch and checkpoints return to the
+# timed cadence.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-checkpointer
+  namespace: default
+spec:
+  displayName: Frequent checkpoints under a write-heavy batch
+  description: >-
+    A background job continuously rewrites a large window of products rows,
+    generating WAL much faster than the baseline. With max_wal_size fixed, the
+    server hits the volume threshold well before checkpoint_timeout, so it issues
+    requested (not timed) checkpoints repeatedly. Each checkpoint drives a spike
+    of buffer writes and fsyncs, and the full-page-write burst after every
+    checkpoint further inflates WAL — a feedback loop between checkpointing and
+    WAL. Queries still succeed but foreground write latency becomes choppy as the
+    checkpointer competes for IO. The tell is the checkpointer itself: the ratio
+    of requested to timed checkpoints climbs, checkpoint write/sync time rises,
+    and WAL generation is far above baseline. Reverting removes the batch load and
+    the checkpoint cadence falls back to the timer.
+  category: reliability
+  severity: medium
+  duration: 20m
+  expectedSymptoms:
+    - checkpoints shift from timed to requested (checkpoints_req rises relative to checkpoints_timed) — they fire on WAL volume, not the 5-minute timer
+    - WAL generation rate is far above baseline, and checkpoint write_time / sync_time and buffers written by the checkpointer rise with it
+    - full-page writes amplify WAL right after each checkpoint, feeding the loop; Postgres may log "checkpoints are occurring too frequently"
+    - foreground write latency on the primary gets choppy and IO utilization climbs, while the workload's own query rate stays constant — the cost is checkpoint/WAL IO, not the queries themselves
+    - onset and recovery track the batch job: stopping it (revert) returns checkpoints to the timed cadence and WAL rate to baseline
+  actions:
+    # A write-heavy, WAL-generating batch. Non-HOT updates (the name column is
+    # GIN-indexed) write both heap and index WAL. Fully reversible — it rewrites
+    # rows to their own value and leaves no extra rows; deleting the Job stops it.
+    - name: batch-rewriter
+      type: Workload
+      workload:
+        name: batch-rewriter
+        engine: postgres
+        concurrency: 2
+        interval: 500ms
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 60000"

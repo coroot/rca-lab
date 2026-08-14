@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/coroot/rca-lab/operator/api/v1alpha1"
@@ -213,5 +214,100 @@ func TestChaosMeshTokenAndBuild(t *testing.T) {
 	obj3, _ := m.buildChaos(rc, ca, tok)
 	if obj3.Object["spec"].(map[string]any)["duration"] != "24h" {
 		t.Fatalf("unbounded duration = %v, want 24h", obj3.Object["spec"].(map[string]any)["duration"])
+	}
+}
+
+// markJobSucceeded flips a Job's status to Succeeded in the fake client so a
+// following Ensure/Revert pass observes completion.
+func markJobSucceeded(t *testing.T, ctx context.Context, c interface {
+	Get(context.Context, types.NamespacedName, client.Object, ...client.GetOption) error
+	Status() client.StatusWriter
+}, name string) {
+	t.Helper()
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: name}, job); err != nil {
+		t.Fatalf("get job %s: %v", name, err)
+	}
+	job.Status.Succeeded = 1
+	if err := c.Status().Update(ctx, job); err != nil {
+		t.Fatalf("mark %s succeeded: %v", name, err)
+	}
+}
+
+// TestDBExecEnsureRevert checks that DBExec creates a one-off Ensure Job with
+// --once args, reports done only once it succeeds, and that Revert runs the
+// revert statements from the token alone.
+func TestDBExecEnsureRevert(t *testing.T) {
+	ctx := context.Background()
+	rc := testRC()
+	spec := &v1alpha1.Action{
+		Name: "disable-autovacuum",
+		Type: v1alpha1.ActionTypeDBExec,
+		DBExec: &v1alpha1.DBExecAction{
+			Name:   "disable-autovacuum",
+			Engine: "postgres",
+			Ensure: []string{"ALTER TABLE products SET (autovacuum_enabled=false)"},
+			Revert: []string{"ALTER TABLE products SET (autovacuum_enabled=true)", "ANALYZE products"},
+		},
+	}
+	d := &DBExec{}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&batchv1.Job{}).Build()
+
+	raw, err := d.Plan(ctx, c, rc, spec)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	var tok DBExecToken
+	if err := json.Unmarshal(raw, &tok); err != nil {
+		t.Fatalf("token does not round-trip: %v", err)
+	}
+	if tok.EnsureName != "disable-autovacuum" || tok.RevertName != "disable-autovacuum-revert" || len(tok.Revert) != 2 {
+		t.Fatalf("token = %+v", tok)
+	}
+
+	// First Ensure creates the Job and is not yet done.
+	done, ra, err := d.Ensure(ctx, c, rc, spec, raw)
+	if err != nil || done || ra <= 0 {
+		t.Fatalf("Ensure #1: done=%v ra=%v err=%v", done, ra, err)
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "disable-autovacuum"}, job); err != nil {
+		t.Fatalf("ensure job not created: %v", err)
+	}
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if len(args) < 4 || args[0] != "dbtool" || args[3] != "--once" {
+		t.Fatalf("unexpected ensure args: %v", args)
+	}
+
+	// Not done until the Job succeeds.
+	markJobSucceeded(t, ctx, c, "disable-autovacuum")
+	done, _, err = d.Ensure(ctx, c, rc, spec, raw)
+	if err != nil || !done {
+		t.Fatalf("Ensure #2: done=%v err=%v", done, err)
+	}
+
+	// Revert creates the revert Job (from the token alone), done once it succeeds.
+	done, _, err = d.Revert(ctx, c, rc, raw)
+	if err != nil || done {
+		t.Fatalf("Revert #1: done=%v err=%v", done, err)
+	}
+	markJobSucceeded(t, ctx, c, "disable-autovacuum-revert")
+	done, _, err = d.Revert(ctx, c, rc, raw)
+	if err != nil || !done {
+		t.Fatalf("Revert #2: done=%v err=%v", done, err)
+	}
+}
+
+// TestDBExecRevertEmpty checks a DBExec with no revert statements reverts to
+// done immediately (nothing to undo).
+func TestDBExecRevertEmpty(t *testing.T) {
+	ctx := context.Background()
+	rc := testRC()
+	tok, _ := json.Marshal(DBExecToken{Namespace: "default", Engine: "postgres", EnsureName: "x", RevertName: "x-revert"})
+	d := &DBExec{}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	done, _, err := d.Revert(ctx, c, rc, tok)
+	if err != nil || !done {
+		t.Fatalf("Revert empty: done=%v err=%v", done, err)
 	}
 }

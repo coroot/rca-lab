@@ -32,6 +32,7 @@ func Run(args []string) error {
 	interval := fs.Duration("interval", time.Second, "pause between iterations per worker")
 	concurrency := fs.Int("concurrency", 1, "number of parallel workers")
 	deadline := fs.Duration("deadline", 0, "optional self-stop after this duration")
+	once := fs.Bool("once", false, "run each query exactly once, in order, then exit (for one-off DDL/DML); exits non-zero on the first error")
 	var queries queryList
 	fs.Var(&queries, "query", "SQL statement to run in a loop (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -74,6 +75,15 @@ func Run(args []string) error {
 		defer cancel()
 	}
 
+	if *once {
+		// One-off mode: statements are DDL/DML (ALTER, VACUUM, ANALYZE, INSERT,
+		// DELETE), run in order on a single connection so session-scoped effects
+		// and statements that cannot run inside a transaction (e.g. VACUUM)
+		// behave. Any failure is fatal so the Job fails and the operator retries.
+		db.SetMaxOpenConns(1)
+		return runOnce(ctx, log, db, queries)
+	}
+
 	log.Info("dbtool starting", "engine", *engine, "queries", len(queries),
 		"concurrency", *concurrency, "interval", interval.String())
 
@@ -87,6 +97,31 @@ func Run(args []string) error {
 	}
 	wg.Wait()
 	log.Info("dbtool exiting")
+	return nil
+}
+
+// runOnce executes each statement a single time, in order, on one connection.
+// It uses Exec (not Query) so command-only statements like VACUUM/ALTER work,
+// and stops at the first error so the Job surfaces the failure.
+func runOnce(ctx context.Context, log *slog.Logger, db *sql.DB, queries []string) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Close()
+	for i, q := range queries {
+		start := time.Now()
+		res, err := conn.ExecContext(ctx, q)
+		if err != nil {
+			return fmt.Errorf("statement %d failed: %w", i+1, err)
+		}
+		affected := int64(-1)
+		if n, e := res.RowsAffected(); e == nil {
+			affected = n
+		}
+		log.Info("statement ok", "n", i+1, "of", len(queries),
+			"rows_affected", affected, "ms", time.Since(start).Milliseconds())
+	}
 	return nil
 }
 

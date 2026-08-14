@@ -47,6 +47,7 @@ const (
 	ActionTypeScale       = "Scale"
 	ActionTypeDeployImage = "DeployImage"
 	ActionTypeChaosMesh   = "ChaosMesh"
+	ActionTypeDBExec      = "DBExec"
 )
 
 // TriggerSpec requests a one-shot manual run: a runID different from
@@ -151,6 +152,39 @@ type DeployImageAction struct {
 	RolloutTimeout *metav1.Duration `json:"rolloutTimeout,omitempty"`
 }
 
+// DBExecAction runs one-off SQL: a set of statements once on activation
+// (Ensure) and a matching set once on revert. Both run as short-lived Jobs via
+// the operator's own dbtool (`dbtool --once`), so they appear as ordinary
+// database sessions and the operator itself never opens a DB connection.
+//
+// Use this for durable database state a Workload's Job-delete cannot undo: a
+// setting toggled with ALTER TABLE/SYSTEM, a large data change, an index
+// dropped as a "migration". Revert is crash-safe — the statements are carried
+// in the revert token and re-run to convergence, so make them idempotent
+// (SET ... / IF EXISTS / re-runnable).
+type DBExecAction struct {
+	// Name is the identity of the exec Jobs (Ensure Job = <name>, Revert Job =
+	// <name>-revert) and the app label the sessions carry.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=55
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// Engine selects the dbtool database driver.
+	// +kubebuilder:validation:Enum=postgres;mysql
+	Engine string `json:"engine"`
+	// Env is passed to the exec container (the DSN via secretKeyRef).
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+	// Ensure runs once, in order, on activation. Each statement must be
+	// idempotent (re-run on retry/restart).
+	// +kubebuilder:validation:MinItems=1
+	Ensure []string `json:"ensure"`
+	// Revert runs once, in order, on revert. Each statement must be idempotent
+	// and tolerate a never-applied Ensure.
+	// +optional
+	Revert []string `json:"revert,omitempty"`
+}
+
 // ChaosMeshAction creates a Chaos Mesh custom resource (e.g. NetworkChaos,
 // StressChaos) verbatim and deletes it on revert. Chaos Mesh's own duration
 // field is set as a dead-man switch so the fault self-recovers if the operator
@@ -168,12 +202,12 @@ type ChaosMeshAction struct {
 }
 
 // Action is a single failure-injection step.
-// +kubebuilder:validation:XValidation:rule="(self.type == 'Workload') == has(self.workload) && (self.type == 'Scale') == has(self.scale) && (self.type == 'DeployImage') == has(self.deployImage) && (self.type == 'ChaosMesh') == has(self.chaosMesh)",message="exactly one of workload/scale/deployImage/chaosMesh must be set and must match type"
+// +kubebuilder:validation:XValidation:rule="(self.type == 'Workload') == has(self.workload) && (self.type == 'Scale') == has(self.scale) && (self.type == 'DeployImage') == has(self.deployImage) && (self.type == 'ChaosMesh') == has(self.chaosMesh) && (self.type == 'DBExec') == has(self.dbExec)",message="exactly one of workload/scale/deployImage/chaosMesh/dbExec must be set and must match type"
 type Action struct {
 	// Name is unique within the scenario.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
-	// +kubebuilder:validation:Enum=Workload;Scale;DeployImage;ChaosMesh
+	// +kubebuilder:validation:Enum=Workload;Scale;DeployImage;ChaosMesh;DBExec
 	Type string `json:"type"`
 	// Delay offsets this action's activation from the run start.
 	// +optional
@@ -186,6 +220,8 @@ type Action struct {
 	DeployImage *DeployImageAction `json:"deployImage,omitempty"`
 	// +optional
 	ChaosMesh *ChaosMeshAction `json:"chaosMesh,omitempty"`
+	// +optional
+	DBExec *DBExecAction `json:"dbExec,omitempty"`
 }
 
 // FailureScenarioSpec defines the desired state of a FailureScenario.
@@ -193,7 +229,7 @@ type FailureScenarioSpec struct {
 	DisplayName string `json:"displayName"`
 	// +optional
 	Description string `json:"description,omitempty"`
-	// +kubebuilder:validation:Enum=database;deploy;infra;app;network;kafka
+	// +kubebuilder:validation:Enum=database;deploy;infra;app;network;kafka;reliability
 	Category string `json:"category"`
 	// +kubebuilder:validation:Enum=low;medium;high
 	Severity string `json:"severity"`

@@ -1,0 +1,76 @@
+# The Postgres standby's network link is degraded (high latency in both
+# directions), so it can no longer keep up with the primary's WAL stream while a
+# write-heavy job runs. Replication lag climbs: the replica falls seconds — then
+# more — behind. This is a reliability risk, not an outage: the primary is fine
+# and reads on the replica still work, but they return increasingly stale data
+# and the standby is a worse and worse failover candidate (a failover now would
+# lose the un-replayed WAL). A good tool should flag the growing replication lag
+# well before it matters. The mechanism is a real network condition on the
+# replica (Chaos Mesh netem), not a fabricated metric, so the standby genuinely
+# lags. Reverting removes the latency and the replica catches back up.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-replication-lag
+  namespace: default
+spec:
+  displayName: Postgres replica falling behind (degraded network)
+  description: >-
+    Chaos Mesh adds ~800ms (±200ms) of latency to the current Postgres standby's
+    traffic in both directions, throttling the WAL stream between it and the
+    primary. A background write job generates a steady stream of WAL on the
+    primary, and because the standby's link is slow it cannot replay fast enough:
+    replication lag (bytes and seconds behind primary) grows over the run. The
+    primary is healthy and writes commit normally; the only problem is that the
+    replica is increasingly behind, so replica reads are stale and the cluster's
+    failover safety margin shrinks. Reverting removes the network latency and
+    stops the extra write load, and the standby replays the backlog and catches
+    up.
+  category: reliability
+  severity: high
+  duration: 20m
+  expectedSymptoms:
+    - Postgres replication lag for the standby grows over the run (bytes behind primary and replay lag in seconds) while the primary stays healthy
+    - the replica's WAL replay / receive falls behind; reads served by the replica return increasingly stale data
+    - the primary shows normal commit throughput and no error rate — the problem is isolated to the standby's ability to keep up, i.e. the replica, not the writes
+    - the tell is on the network path to the replica (latency), not the database engine: the standby's own CPU and disk are not saturated
+    - onset and recovery track the injected latency; removing it lets the replica replay the backlog and lag returns to ~0
+  actions:
+    # 1. Degrade the current standby's network (selected by role=replica so it
+    #    follows failovers). Chaos Mesh's own duration is set by the operator as a
+    #    dead-man switch, so the fault self-heals if the operator dies.
+    - name: replica-network-latency
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: delay
+          mode: all
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              postgres-operator.crunchydata.com/cluster: pg
+              postgres-operator.crunchydata.com/role: replica
+          direction: both
+          delay:
+            latency: "800ms"
+            jitter: "200ms"
+            correlation: "50"
+    # 2. Generate WAL on the primary so the throttled standby has volume to fall
+    #    behind on. Autovacuum stays on; the churn is a no-op rewrite (reversible).
+    - name: wal-writer
+      type: Workload
+      delay: 20s
+      workload:
+        name: wal-writer
+        engine: postgres
+        concurrency: 2
+        interval: 1s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 20000"

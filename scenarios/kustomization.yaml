@@ -15,3 +15,8 @@ resources:
   - infra/cpu-noisy-neighbor.yaml
   - network/dns-slow-resolution.yaml
   - network/network-delay-product-catalog.yaml
+  - reliability/pg-table-bloat.yaml
+  - reliability/pg-stale-statistics.yaml
+  - reliability/pg-vacuum-blocked.yaml
+  - reliability/pg-replication-lag.yaml
+  - reliability/pg-checkpointer.yaml

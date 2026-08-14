@@ -96,6 +96,14 @@
   #toast.ok { background: #059669; }
   #toast.err { background: var(--danger); }
   .loading { padding: 40px; text-align: center; color: var(--muted); }
+  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  #search {
+    flex: 1; max-width: 380px; font: inherit; font-size: 14px;
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card); color: var(--text);
+  }
+  #search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+  .count { color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -107,6 +115,11 @@
   </div>
 </header>
 <main>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search by name, category, or state…" autocomplete="off"
+           spellcheck="false" oninput="onSearch(this.value)">
+    <span class="count" id="count"></span>
+  </div>
   <table id="tbl">
     <thead>
       <tr>
@@ -128,6 +141,8 @@ const REFRESH_MS = 3000;
 let expanded = null;      // name of the currently expanded row
 let details = {};         // cache of fetched detail objects by name
 let busy = false;         // suppress refresh re-render while a menu interaction is mid-flight
+let allScenarios = [];    // last full list from /api/scenarios (unfiltered)
+let filterText = "";      // current search box query, lowercased
 
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
@@ -165,9 +180,38 @@ function actionCell(s) {
   return `<button class="stop" onclick="act('disable','${esc(s.name)}')">■ Stop</button>`;
 }
 
+function onSearch(v) {
+  filterText = v.trim().toLowerCase();
+  render(applyFilter(allScenarios));
+}
+
+// A scenario matches when the query is a substring of its name, display name,
+// category, or current state. Cached detail (description + expected symptoms) is
+// also searched once a row has been expanded.
+function matchScenario(s) {
+  if (!filterText) return true;
+  const parts = [s.name, s.displayName, s.category, s.phase || "Idle"];
+  const d = details[s.name];
+  if (d) { parts.push(d.description); parts.push((d.expectedSymptoms || []).join(" ")); }
+  return parts.some(p => p && String(p).toLowerCase().includes(filterText));
+}
+
+function applyFilter(list) { return list.filter(matchScenario); }
+
+function updateCount(shown, total) {
+  const el = document.getElementById("count");
+  if (!el) return;
+  el.textContent = filterText ? `${shown} of ${total} match` : `${total} scenario${total === 1 ? "" : "s"}`;
+}
+
 function render(list) {
   const tb = document.getElementById("rows");
-  if (!list.length) { tb.innerHTML = `<tr><td colspan="4" class="empty" style="text-align:center;padding:30px">No scenarios found.</td></tr>`; return; }
+  updateCount(list.length, allScenarios.length);
+  if (!list.length) {
+    const msg = filterText ? `No scenarios match “${esc(filterText)}”.` : "No scenarios found.";
+    tb.innerHTML = `<tr><td colspan="4" class="empty" style="text-align:center;padding:30px">${msg}</td></tr>`;
+    return;
+  }
   let html = "";
   for (const s of list) {
     html += `<tr class="row-main" onclick="toggle('${esc(s.name)}')">
@@ -264,7 +308,8 @@ async function resetAll() {
 async function refresh() {
   try {
     const list = await api("GET", "/api/scenarios");
-    render(list);
+    allScenarios = list;
+    render(applyFilter(list));
     if (expanded && !details[expanded]) {
       // detail still loading; leave placeholder
     }

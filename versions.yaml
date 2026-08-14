@@ -15,7 +15,7 @@ services:
   fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
   load-generator: 1.0.0
   data-seeder: 1.0.5          # create indexes before early-return (idempotent)
-  operator: 1.2.0             # ChaosMesh action + Workload cpu-burn/affinity
+  operator: 1.3.0             # DBExec action (one-off setup/teardown SQL) + reliability scenarios + UI search
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).
 charts:

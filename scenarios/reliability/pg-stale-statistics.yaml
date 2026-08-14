@@ -1,0 +1,59 @@
+# The planner's statistics for the products table are frozen while the data
+# underneath them shifts: autoanalyze is turned off and a large fraction of rows
+# have their category re-labelled to values the frozen histogram has never seen.
+# The planner now estimates ~1 row for those categories when there are hundreds
+# of thousands, so it picks bad plans (index/nested-loop where a scan/hash is
+# right). This is a latent risk, distinct from bloat: the table is not
+# necessarily bloated, but the OPTIMIZER is flying blind. A good tool should flag
+# that statistics are stale and a large unanalyzed change has occurred — before
+# the mis-estimates cause a slow-query incident.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-stale-statistics
+  namespace: default
+spec:
+  displayName: Stale planner statistics after a large data change
+  description: >-
+    Autoanalyze is disabled on the products table and its statistics are frozen
+    (ANALYZE at a known-good point), then ~10% of rows are re-labelled into brand
+    new category values the frozen stats have never observed. Because the planner
+    trusts stale statistics, its row estimates for the changed categories are off
+    by orders of magnitude (estimates ~1 row, reality is large), so it chooses
+    poor plans. n_mod_since_analyze grows large and last_analyze stays old while
+    the data keeps diverging. The table itself is fine — the risk is that the
+    optimizer's model no longer matches reality. Reverting restores the original
+    category values, re-enables autoanalyze and re-analyzes, so estimates match
+    again.
+  category: reliability
+  severity: medium
+  duration: 30m
+  expectedSymptoms:
+    - autoanalyze is off on public.products (last_analyze / last_autoanalyze stay old) while n_mod_since_analyze grows large
+    - planner row estimates for the changed categories diverge wildly from actual (estimated ~1, actual very large) — visible in EXPLAIN ANALYZE
+    - queries filtering on the affected column can flip to worse plans (index/nested-loop instead of scan/hash), raising latency and rows-read without any code or traffic change
+    - unlike table bloat, dead-tuple growth is not the story here — the tell is stale statistics and a large unanalyzed data change
+    - revert (ANALYZE + re-enable autoanalyze + restore values) brings estimates back in line and plans recover
+  actions:
+    # Freeze stats at a good point, disable autoanalyze, then skew the category
+    # distribution with a reversible prefix. Revert strips the prefix, re-enables
+    # autovacuum/autoanalyze and re-analyzes. All statements are idempotent.
+    - name: skew-and-freeze-stats
+      type: DBExec
+      dbExec:
+        name: skew-and-freeze-stats
+        engine: postgres
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        ensure:
+          - "ALTER TABLE products SET (autovacuum_enabled = false)"
+          - "ANALYZE products"
+          - "UPDATE products SET category = 'STALE:' || category WHERE id % 10 = 0 AND category NOT LIKE 'STALE:%'"
+        revert:
+          - "UPDATE products SET category = substring(category from 7) WHERE category LIKE 'STALE:%'"
+          - "ALTER TABLE products SET (autovacuum_enabled = true)"
+          - "ANALYZE products"

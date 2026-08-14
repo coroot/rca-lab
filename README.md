@@ -86,6 +86,15 @@ Every scenario uses a genuine real-world mechanism — never a synthetic fault
 flag inside the app — and reverts durably. Each carries an `expectedSymptoms`
 list that doubles as documentation and a grading rubric for RCA tools.
 
+The `reliability` category is a different *kind* of test. The other scenarios
+are acute incidents (latency, errors, saturation) that exercise **RCA** — given
+a symptom, find the cause. Reliability scenarios are latent, slow-burn risks
+(bloat, stale stats, blocked vacuum, replication lag, checkpoint pressure) that
+often produce **no user-facing symptom at onset**; they exercise proactive
+**detection** — whether a tool flags a developing risk before it becomes an
+outage. Their `expectedSymptoms` are early-warning indicators, not incident
+symptoms.
+
 | Scenario | Category | Mechanism | What an RCA tool should find |
 |----------|----------|-----------|------------------------------|
 | `pg-analytics-queries` | database | An `analytics-reporting` workload runs heavy multi-join/aggregation queries (full scans of the ~10 GB products table) against the production PostgreSQL, through the same pgBouncer pool as the apps. | Elevated `product-catalog`/`inventory-service` latency; PostgreSQL CPU/IO saturation; new full-scan query fingerprints in `pg_stat_statements` attributable to the `analytics-reporting` workload. |
@@ -101,6 +110,11 @@ list that doubles as documentation and a grading rubric for RCA tools.
 | `cpu-noisy-neighbor` | infra | A batch `video-transcoder` workload is co-located (pod affinity) onto the nodes running `order-service` and burns all their cores. | Node CPU saturates (~100%); the Burstable `order-service` is starved far below its normal CPU; its dependencies (MySQL, Kafka) stay healthy — the cause is node-local CPU contention from a co-tenant, not the victim. |
 | `dns-slow-resolution` | network | Chaos Mesh delays the app tier's packets to the cluster DNS service (~500 ms) — a real network condition on the DNS path, not fabricated answers — so every name lookup is slow. | Services show intermittent p95/p99 spikes on *all* outbound calls (each new connection front-loads a slow lookup), while every dependency **and CoreDNS itself** stay healthy (flat CPU). The tell is DNS query latency, not any one hop — the classic "it's always DNS." |
 | `network-delay-product-catalog` | network | Chaos Mesh injects ~200 ms of egress latency on `product-catalog` (a `NetworkChaos` fault with a dead-man `spec.duration`). | `api-gateway` latency for catalog-backed endpoints jumps to ~1 s while `product-catalog`'s own CPU/DB stay healthy; the delay is on the network path, not in the service or PostgreSQL. |
+| `pg-table-bloat` | reliability | Autovacuum is disabled on `products` (a "maintenance" `ALTER`) and a background job rewrites a hot row window, so dead tuples accumulate with nothing to reclaim them. | **Detection, not RCA:** no acute symptom at onset — `n_dead_tup`/dead-tuple ratio climbs with `last_autovacuum` old, the heap and GIN index grow on disk, cache-hit ratio drifts down. A tool should flag the developing bloat before it turns into an outage. |
+| `pg-stale-statistics` | reliability | Autoanalyze is off on `products`, stats are frozen at a good point, then ~10 % of rows are re-labelled into category values the histogram has never seen. | Planner row estimates for the changed values are off by orders of magnitude (est. ~1, actual large) → poor plans; `n_mod_since_analyze` large, `last_analyze` old. The tell is stale statistics + a large unanalyzed change, **not** bloat. |
+| `pg-vacuum-blocked` | reliability | A `REPEATABLE READ` "reporting" transaction takes a snapshot and stalls, pinning the xmin horizon, while a job churns rows. | Autovacuum runs *successfully* (`last_autovacuum` recent) yet `n_dead_tup` still climbs — it can't remove tuples newer than the held snapshot; a very old transaction / `backend_xmin` age holds the horizon. Not lock contention — no query is blocked. |
+| `pg-replication-lag` | reliability | Chaos Mesh adds ~800 ms latency (both directions) to the current standby (selected by `role=replica`, so it follows failovers), throttling WAL streaming while a write job generates WAL. | Replication lag (bytes/seconds behind primary) grows while the primary stays healthy; replica reads go stale and the failover safety margin shrinks. The tell is on the network path to the replica, not the engine — the replica's CPU/disk are fine. |
+| `pg-checkpointer` | reliability | A write-heavy batch rewrites a large row window continuously, generating WAL far faster than baseline, so checkpoints fire on `max_wal_size` instead of the 5-min timer. | Checkpoints shift timed→requested (`checkpoints_req` rises), checkpoint write/sync time and WAL rate climb, full-page writes amplify WAL; foreground write latency gets choppy while query rate is constant. The cost is checkpoint/WAL IO, not the queries. |
 
 More scenarios (bad migrations, connection-pool leaks, Kafka consumer lag,
 cache eviction pressure, and others) are on the roadmap; each will follow the

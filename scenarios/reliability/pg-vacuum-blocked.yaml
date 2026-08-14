@@ -1,0 +1,72 @@
+# A long-running transaction sits open with an old snapshot, pinning Postgres's
+# xmin horizon. Autovacuum runs on schedule and reports success, yet it cannot
+# remove any dead tuple newer than that snapshot — so dead tuples pile up on a
+# churned table DESPITE a healthy, recently-run autovacuum. This is the classic,
+# easily-missed "vacuum can't keep up because something holds a snapshot" risk;
+# at the extreme it is what leads to xid-wraparound emergencies. The distinctive
+# tell versus plain bloat: autovacuum IS running (last_autovacuum is recent), but
+# a very old transaction / large backend_xmin age is holding the horizon back.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-vacuum-blocked
+  namespace: default
+spec:
+  displayName: Vacuum held back by a long-running transaction
+  description: >-
+    A "reporting" session opens a REPEATABLE READ transaction, takes its snapshot
+    and then stalls (never commits), pinning the global xmin horizon. Meanwhile a
+    background job keeps rewriting a hot window of products rows, generating dead
+    tuples. Autovacuum wakes up and vacuums the table — last_autovacuum stays
+    recent — but it may only reclaim tuples older than the pinned snapshot, so
+    n_dead_tup climbs anyway. The database looks healthy on the surface (vacuum is
+    running, no locks blocking queries), yet dead-tuple growth is unbounded and
+    the transaction-id horizon is frozen. Reverting terminates the stalled
+    session; the horizon advances and the next autovacuum reclaims the backlog.
+  category: reliability
+  severity: high
+  duration: 30m
+  expectedSymptoms:
+    - a very old transaction is open (pg_stat_activity: large xact_start age; backend_xmin held) — a REPEATABLE READ session that took a snapshot and never committed
+    - dead tuples on public.products climb even though autovacuum runs successfully (last_autovacuum stays recent) — vacuum can't remove tuples newer than the held snapshot
+    - the oldest-snapshot / xmin horizon (age(backend_xmin), and over time datfrozenxid age) stops advancing while the transaction is held
+    - no query is blocked and CPU/IO look normal — this is not lock contention; the risk is the frozen horizon, which is easy to miss
+    - terminating the stalled transaction (revert) lets the horizon advance and autovacuum reclaims the accumulated dead tuples
+  actions:
+    # 1. The stalled reporting transaction: REPEATABLE READ takes a snapshot at
+    #    the first query and holds it. pg_sleep outlives the run, so the Job's
+    #    deadline (or a manual revert) drops the connection, rolling it back and
+    #    releasing the horizon.
+    - name: reporting-snapshot
+      type: Workload
+      workload:
+        name: reporting-snapshot
+        engine: postgres
+        concurrency: 1
+        interval: 10s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(1800);"
+    # 2. Churn a hot window so dead tuples are generated for autovacuum to (fail
+    #    to fully) reclaim while the horizon is pinned. Autovacuum stays enabled.
+    - name: row-rewriter
+      type: Workload
+      delay: 15s
+      workload:
+        name: row-rewriter
+        engine: postgres
+        concurrency: 1
+        interval: 2s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 5000"

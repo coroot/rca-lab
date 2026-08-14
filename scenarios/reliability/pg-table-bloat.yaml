@@ -1,0 +1,70 @@
+# Autovacuum is turned off on the products table and a steady stream of updates
+# rewrites the same rows, so dead tuples pile up with nothing to reclaim them —
+# the table and its indexes bloat. This is a slow-burn reliability risk, not an
+# acute incident: for a while queries still return correct results, but the heap
+# and index keep growing, cache hit ratio drifts down and IO creeps up. A good
+# monitoring tool should flag the developing bloat (dead-tuple ratio, table
+# growth, autovacuum disabled) BEFORE it turns into an outage — that detection,
+# not an RCA on a live symptom, is what this scenario exercises.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: pg-table-bloat
+  namespace: default
+spec:
+  displayName: Table bloat from disabled autovacuum + churn
+  description: >-
+    A "maintenance" change disables autovacuum on the products table
+    (autovacuum_enabled=false), and a background job then repeatedly rewrites a
+    hot window of rows. Every UPDATE leaves a dead tuple, and with autovacuum off
+    nothing reclaims them: n_dead_tup climbs without bound, the heap and the GIN
+    index grow, and last_autovacuum stays old/never. Nothing breaks immediately —
+    this is a latent risk that degrades cache locality and IO over time and
+    eventually threatens the table. Reverting re-enables autovacuum (which then
+    reclaims the dead tuples) and re-analyzes the table.
+  category: reliability
+  severity: medium
+  duration: 30m
+  expectedSymptoms:
+    - dead tuples on public.products (n_dead_tup) grow steadily with no matching autovacuum; the dead/live ratio climbs
+    - autovacuum is disabled on the table (last_autovacuum stays old/NULL) even though the table is being heavily modified
+    - the products heap and its GIN index grow on disk; cache hit ratio drifts down and IO per query creeps up
+    - no user-facing error or latency spike at onset — the risk is latent and accumulates; this tests proactive detection of bloat, not RCA of a live outage
+    - re-enabling autovacuum (revert) lets the reclaim happen; dead tuples fall back and growth stops
+  actions:
+    # 1. Disable autovacuum on the table. Revert re-enables it and analyzes.
+    - name: disable-autovacuum
+      type: DBExec
+      dbExec:
+        name: disable-autovacuum
+        engine: postgres
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        ensure:
+          - "ALTER TABLE products SET (autovacuum_enabled = false, toast.autovacuum_enabled = false)"
+        revert:
+          - "ALTER TABLE products SET (autovacuum_enabled = true, toast.autovacuum_enabled = true)"
+          - "ANALYZE products"
+    # 2. Churn a hot window of rows so dead tuples accumulate. Updating the
+    #    GIN-indexed name column forces non-HOT updates (heap + index bloat).
+    #    Deleting the Job stops the churn; revert of action 1 reclaims the space.
+    - name: row-rewriter
+      type: Workload
+      delay: 15s
+      workload:
+        name: row-rewriter
+        engine: postgres
+        concurrency: 1
+        interval: 2s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 5000"

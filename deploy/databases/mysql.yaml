@@ -49,7 +49,9 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 8Gi
+            # Continuous load grows orders/payments; the mysql-retention CronJob
+            # bounds row growth, and this gives comfortable headroom.
+            storage: 20Gi
   haproxy:
     enabled: true
     size: 2

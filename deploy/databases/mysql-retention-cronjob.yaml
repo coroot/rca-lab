@@ -1,0 +1,99 @@
+# Bounds MySQL data growth. The load-generator drives continuous orders and
+# payments, so orders/payments/order_items/shipments grow without limit and
+# eventually fill the PXC data volumes. This CronJob trims rows older than a
+# retention window in small, paced batches (safe for Galera), keeping the
+# dataset large enough for the analytics scenarios while capping disk use.
+#
+# Deletes don't shrink the InnoDB files, but they free space *inside* them that
+# new inserts reuse — so the files plateau instead of growing. FK-safe: order
+# children (order_items) are removed before their orders, and orders are only
+# deleted once they have no remaining items (NOT EXISTS guard), so a per-run
+# batch cap can never cause a foreign-key error.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-retention
+  namespace: default
+  labels:
+    app: mysql-retention
+spec:
+  schedule: "17 * * * *"        # hourly, off the top of the hour
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3000
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: mysql-retention
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: retention
+              # Reuse the PXC image (already on every node) for a matching mysql client.
+              image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
+              env:
+                - name: RETENTION_DAYS
+                  value: "7"
+                - name: BATCH
+                  value: "20000"
+                - name: MAX_BATCHES          # cap deletions per table per run (2M) so the first pass is gradual
+                  value: "100"
+                - name: SLEEP
+                  value: "0.3"
+                - name: MYSQL_HOST
+                  value: "mysql-haproxy"
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: internal-mysql
+                      key: root
+              command: ["bash", "-c"]
+              args:
+                - |
+                  set -eu
+                  MYSQL="mysql -h ${MYSQL_HOST} -P3306 -uroot -p${MYSQL_ROOT_PASSWORD} -N -B"
+                  CUTOFF="NOW() - INTERVAL ${RETENTION_DAYS} DAY"
+
+                  drain() { # $1 = a DELETE without LIMIT; loops LIMIT batches up to MAX_BATCHES
+                    local i=0 n
+                    while [ "$i" -lt "${MAX_BATCHES}" ]; do
+                      n=$(${MYSQL} -e "$1 LIMIT ${BATCH}; SELECT ROW_COUNT();" | tail -n1)
+                      n=${n:-0}
+                      echo "      batch -${n}"
+                      [ "${n}" -lt "${BATCH}" ] && break
+                      i=$((i+1)); sleep "${SLEEP}"
+                    done
+                  }
+
+                  echo "mysql-retention: keep ${RETENTION_DAYS}d (cutoff = ${CUTOFF})"
+
+                  # orders + order_items: id cutoff = newest order older than the window.
+                  OCUT=$(${MYSQL} -e "SELECT COALESCE(MAX(id),0) FROM orders.orders WHERE created_at < ${CUTOFF};")
+                  echo "orders id cutoff <= ${OCUT}"
+                  if [ "${OCUT:-0}" -gt 0 ]; then
+                    echo "  order_items:"; drain "DELETE FROM orders.order_items WHERE order_id <= ${OCUT}"
+                    # Only delete orders that no longer have items, so a capped item
+                    # drain can never leave an FK violation.
+                    echo "  orders:";      drain "DELETE FROM orders.orders AS o WHERE o.id <= ${OCUT} AND NOT EXISTS (SELECT 1 FROM orders.order_items oi WHERE oi.order_id = o.id)"
+                  fi
+
+                  # shipments: standalone, id cutoff by created_at.
+                  SCUT=$(${MYSQL} -e "SELECT COALESCE(MAX(id),0) FROM orders.shipments WHERE created_at < ${CUTOFF};")
+                  echo "shipments id cutoff <= ${SCUT}"
+                  [ "${SCUT:-0}" -gt 0 ] && { echo "  shipments:"; drain "DELETE FROM orders.shipments WHERE id <= ${SCUT}"; }
+
+                  # payments: UUID pk, so trim by created_at (indexed).
+                  echo "  payments:"; drain "DELETE FROM payments.payments WHERE created_at < ${CUTOFF}"
+
+                  echo "mysql-retention: pass complete"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi

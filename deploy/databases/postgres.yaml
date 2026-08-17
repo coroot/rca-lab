@@ -17,6 +17,11 @@ spec:
         parameters:
           pg_stat_statements.track: "all"
           track_io_timing: "on"
+          # Self-heal orphaned transactions: a client killed mid-transaction
+          # (e.g. a PHP-FPM worker hitting its request timeout) can otherwise
+          # leave a server-side connection idle-in-transaction forever, holding
+          # locks and pinning the xmin horizon. Roll such sessions back after 60s.
+          idle_in_transaction_session_timeout: "60000"
   extensions:
     builtin:
       pg_stat_statements: true

@@ -10,7 +10,7 @@ services:
   order-service: 1.0.1          # glibc JRE base (snappy-java native lib needs glibc)
   review-service: 1.0.1        # Mongo credentials as driver options
   payment-service: 1.0.1       # MySQL credentials as discrete parts
-  inventory-service: 1.0.1     # urldecode pgbouncer-uri credentials
+  inventory-service: 1.0.2     # non-persistent conn + statement/lock timeouts; single-flight migrate
   recommendation-service: 1.0.0
   fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
   load-generator: 1.0.0

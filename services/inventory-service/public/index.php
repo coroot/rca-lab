@@ -35,6 +35,16 @@ register_shutdown_function(function () use ($otelSpan, $otelScope): void {
 function migrate(): void
 {
     $db = Database::get();
+    // Single-flight: only one worker runs the DDL at a time. Concurrent
+    // CREATE INDEX on a fresh container would otherwise contend and, on the
+    // request path, pile up. If we can't get the lock, another worker is doing
+    // it (all statements are IF NOT EXISTS), so skip.
+    // ::int so the result is an unambiguous 1/0 (PDO_pgsql returns booleans as
+    // the strings 't'/'f', both of which are truthy).
+    if ((int) $db->query("SELECT pg_try_advisory_lock(742301)::int")->fetchColumn() !== 1) {
+        return;
+    }
+    try {
     $db->exec("
         CREATE TABLE IF NOT EXISTS inventory_stock (
             product_id INTEGER PRIMARY KEY,
@@ -56,17 +66,22 @@ function migrate(): void
         CREATE INDEX IF NOT EXISTS idx_reservations_product ON inventory_reservations (product_id, status);
         CREATE INDEX IF NOT EXISTS idx_reservations_user ON inventory_reservations (user_id, status);
     ");
+    } finally {
+        $db->exec("SELECT pg_advisory_unlock(742301)");
+    }
 }
 
-// Run migration once per container (marker file persists across requests)
+// Run migration once per container (marker file persists across requests).
 $migrationMarker = '/tmp/.inventory_migrated';
 if (!file_exists($migrationMarker)) {
     try {
         migrate();
-        file_put_contents($migrationMarker, date('c'));
-    } catch (Exception $e) {
-        // Tables likely already exist
+    } catch (Throwable $e) {
+        // Tables likely already exist; don't block requests on migration.
     }
+    // Always mark, even on failure/skip, so migration never runs on the request
+    // path again for this container.
+    @file_put_contents($migrationMarker, date('c'));
 }
 
 // --- Routing ---

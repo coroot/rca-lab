@@ -24,11 +24,19 @@ class Database
 
             $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};sslmode=require";
 
+            // Non-persistent: a persistent connection left mid-transaction (a
+            // request killed at the FPM timeout) would linger in the pool
+            // idle-in-transaction, holding locks. A fresh per-request connection
+            // is cleaned up at request end instead.
             self::$instance = new PDO($dsn, $user, $pass, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_PERSISTENT => true,
+                PDO::ATTR_PERSISTENT => false,
             ]);
+            // Fail fast rather than hang past the FPM request timeout (which
+            // would kill the worker mid-query and orphan the transaction).
+            self::$instance->exec("SET statement_timeout = '10s'");
+            self::$instance->exec("SET lock_timeout = '5s'");
         }
         return self::$instance;
     }

@@ -24,14 +24,18 @@ class Database
 
             $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};sslmode=require";
 
-            // Non-persistent: a persistent connection left mid-transaction (a
-            // request killed at the FPM timeout) would linger in the pool
-            // idle-in-transaction, holding locks. A fresh per-request connection
-            // is cleaned up at request end instead.
+            // Persistent (pooled) connections: without them, every request pays
+            // a full TLS handshake to pgbouncer — a large per-request CPU cost
+            // for a PHP-FPM service (it was CPU-throttled ~80% of the time).
+            // pgbouncer runs in session mode, so each FPM worker keeps a stable
+            // server session (SET below sticks, no cross-client leak). An
+            // orphaned transaction (a worker killed mid-request) can no longer
+            // wedge the DB: the cluster's idle_in_transaction_session_timeout
+            // (60s) rolls it back, and the timeouts below make queries fail fast.
             self::$instance = new PDO($dsn, $user, $pass, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_PERSISTENT => false,
+                PDO::ATTR_PERSISTENT => true,
             ]);
             // Fail fast rather than hang past the FPM request timeout (which
             // would kill the worker mid-query and orphan the transaction).

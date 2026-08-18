@@ -38,10 +38,12 @@ spec:
                   key: pgbouncer-uri
           resources:
             requests:
-              cpu: 100m
+              cpu: 250m
               memory: 128Mi
             limits:
-              cpu: 500m
+              # 1 core (was 500m): PHP-FPM + OpenTelemetry is CPU-heavy and was
+              # throttled ~80% of CPU periods at 500m, driving request latency.
+              cpu: "1"
               memory: 256Mi
           livenessProbe:
             httpGet:

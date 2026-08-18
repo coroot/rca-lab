@@ -17,6 +17,13 @@ spec:
     image: docker.io/percona/percona-xtradb-cluster:8.4.8-8.1
     configuration: |
       [mysqld]
+      # Pin the buffer pool instead of letting the operator autotune it to 50%
+      # of the memory limit. InnoDB's non-buffer-pool memory (ancillary
+      # structures, per-connection buffers with max_connections=170, Galera)
+      # runs roughly as large as the buffer pool itself, so a 50%-of-limit pool
+      # leaves too little headroom and the container OOM-kills as the pool warms.
+      # 1Gi pool under a 3Gi limit leaves ~2Gi for everything else.
+      innodb_buffer_pool_size = 1G
       # Keep binary logs bounded. The lab has no external async replicas, and PXC
       # uses its gcache (not binlogs) for node recovery, so a short retention is
       # safe. The 30-day default (binlog_expire_logs_seconds=2592000) fills the
@@ -40,10 +47,12 @@ spec:
     resources:
       requests:
         cpu: 500m
-        memory: 1Gi
+        memory: 1536Mi
       limits:
         cpu: "2"
-        memory: 2Gi
+        # 3Gi (was 2Gi): a 1Gi buffer pool + InnoDB overhead + connections needs
+        # ~2.5Gi RSS under load; 2Gi OOM-killed the pods repeatedly.
+        memory: 3Gi
     volumeSpec:
       persistentVolumeClaim:
         accessModes: ["ReadWriteOnce"]

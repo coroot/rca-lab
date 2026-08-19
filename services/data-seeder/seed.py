@@ -401,6 +401,12 @@ def seed_mysql_orders():
     conn.commit()
     mysql_ensure_index(cur, "CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC)")
     mysql_ensure_index(cur, "CREATE INDEX idx_order_items_order_id ON order_items(order_id)")
+    # created_at indexes for the mysql-retention CronJob's cutoff queries. Without
+    # them the hourly retention pass full-scans orders (~3.6M) and shipments
+    # (~3.6M) to find the id cutoff, churning the writer's buffer pool and CPU
+    # under live order traffic. With them each cutoff is a small range scan.
+    mysql_ensure_index(cur, "CREATE INDEX idx_orders_created_at ON orders(created_at)")
+    mysql_ensure_index(cur, "CREATE INDEX idx_shipments_created_at ON shipments(created_at)")
     conn.commit()
 
     cur.execute("SELECT COALESCE(MAX(id), 0) FROM orders")

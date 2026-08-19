@@ -12,9 +12,9 @@ services:
   payment-service: 1.0.1       # MySQL credentials as discrete parts
   inventory-service: 1.0.3     # perf: persistent conns, opcache tuning, optimized autoloader
   recommendation-service: 1.0.0
-  fulfillment-service: 1.0.1   # MySQL credentials as discrete parts
+  fulfillment-service: 1.0.2   # idx_shipments_created_at for cheap retention cutoffs
   load-generator: 1.0.0
-  data-seeder: 1.0.5          # create indexes before early-return (idempotent)
+  data-seeder: 1.0.6          # created_at indexes on orders + shipments for retention cutoffs
   operator: 1.4.0             # UI: group scenarios by category + severity column
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).

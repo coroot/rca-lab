@@ -9,6 +9,19 @@
 # children (order_items) are removed before their orders, and orders are only
 # deleted once they have no remaining items (NOT EXISTS guard), so a per-run
 # batch cap can never cause a foreign-key error.
+#
+# Low-impact on live order/payment traffic (this is a shared PXC cluster):
+#   * Read-only cutoff scans go to the reader HAProxy (mysql-haproxy-replicas),
+#     so they never churn the writer node's buffer pool / CPU. Cheap anyway —
+#     orders/shipments/payments are all indexed on created_at (idx_*_created_at,
+#     created by data-seeder), so each cutoff is a small range scan.
+#   * Small write-sets (BATCH=2000): a big DELETE replicates as one Galera
+#     write-set that every node must certify+apply; while the slowest applier's
+#     queue backs up the cluster pauses ALL commits (flow control), stalling
+#     live INSERTs. Small batches keep each write-set tiny.
+#   * Flow-control-aware pacing: the job reads wsrep_flow_control_paused_ns
+#     around each batch and, if its own write made the cluster pause, backs off
+#     hard (FC_SLEEP) so appliers drain first. Inline pt-archiver --max-flow-ctl.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -39,14 +52,18 @@ spec:
               env:
                 - name: RETENTION_DAYS
                   value: "7"
-                - name: BATCH
-                  value: "20000"
-                - name: MAX_BATCHES          # cap deletions per table per run (2M) so the first pass is gradual
-                  value: "100"
-                - name: SLEEP
-                  value: "0.3"
-                - name: MYSQL_HOST
+                - name: BATCH               # small write-sets → minimal Galera flow control
+                  value: "2000"
+                - name: MAX_BATCHES         # cap deletions per table per run (400k) so a backlog catches up gradually
+                  value: "200"
+                - name: SLEEP               # base pause between batches
+                  value: "0.5"
+                - name: FC_SLEEP            # longer pause after a batch that made the cluster pause on flow control
+                  value: "3"
+                - name: MYSQL_HOST          # writer HAProxy: DELETEs + flow-control status
                   value: "mysql-haproxy"
+                - name: MYSQL_RO_HOST       # reader HAProxy: read-only cutoff scans, off the writer node
+                  value: "mysql-haproxy-replicas"
                 - name: MYSQL_ROOT_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -56,24 +73,38 @@ spec:
               args:
                 - |
                   set -eu
-                  MYSQL="mysql -h ${MYSQL_HOST} -P3306 -uroot -p${MYSQL_ROOT_PASSWORD} -N -B"
+                  # Pass the password via MYSQL_PWD, not -p, so it stays out of the
+                  # process args (ps) and the client's insecure-password warning.
+                  export MYSQL_PWD="${MYSQL_ROOT_PASSWORD}"
+                  # Writes (DELETEs) + flow-control status → writer HAProxy.
+                  MYSQL="mysql -h ${MYSQL_HOST} -P3306 -uroot -N -B"
+                  # Read-only cutoff scans → reader HAProxy (off the writer node).
+                  MYSQL_RO="mysql -h ${MYSQL_RO_HOST} -P3306 -uroot -N -B"
                   CUTOFF="NOW() - INTERVAL ${RETENTION_DAYS} DAY"
 
-                  drain() { # $1 = a DELETE without LIMIT; loops LIMIT batches up to MAX_BATCHES
-                    local i=0 n
+                  # Cumulative time (ns) this node has been paused by Galera flow control.
+                  fcp() { ${MYSQL} -e "SHOW GLOBAL STATUS LIKE 'wsrep_flow_control_paused_ns';" | awk '{print $2}'; }
+
+                  drain() { # $1 = a DELETE without LIMIT; loops small LIMIT batches, pacing on flow control
+                    local i=0 n p0 p1
                     while [ "$i" -lt "${MAX_BATCHES}" ]; do
+                      p0=$(fcp)
                       n=$(${MYSQL} -e "$1 LIMIT ${BATCH}; SELECT ROW_COUNT();" | tail -n1)
                       n=${n:-0}
-                      echo "      batch -${n}"
+                      p1=$(fcp)
+                      echo "      batch -${n} (fc_paused_ns +$(( ${p1:-0} - ${p0:-0} )))"
                       [ "${n}" -lt "${BATCH}" ] && break
-                      i=$((i+1)); sleep "${SLEEP}"
+                      # If this write-set made the cluster pause on flow control it is
+                      # stalling live commits — back off hard so appliers drain first.
+                      if [ "$(( ${p1:-0} - ${p0:-0} ))" -gt 0 ]; then sleep "${FC_SLEEP}"; else sleep "${SLEEP}"; fi
+                      i=$((i+1))
                     done
                   }
 
                   echo "mysql-retention: keep ${RETENTION_DAYS}d (cutoff = ${CUTOFF})"
 
                   # orders + order_items: id cutoff = newest order older than the window.
-                  OCUT=$(${MYSQL} -e "SELECT COALESCE(MAX(id),0) FROM orders.orders WHERE created_at < ${CUTOFF};")
+                  OCUT=$(${MYSQL_RO} -e "SELECT COALESCE(MAX(id),0) FROM orders.orders WHERE created_at < ${CUTOFF};")
                   echo "orders id cutoff <= ${OCUT}"
                   if [ "${OCUT:-0}" -gt 0 ]; then
                     echo "  order_items:"; drain "DELETE FROM orders.order_items WHERE order_id <= ${OCUT}"
@@ -83,7 +114,7 @@ spec:
                   fi
 
                   # shipments: standalone, id cutoff by created_at.
-                  SCUT=$(${MYSQL} -e "SELECT COALESCE(MAX(id),0) FROM orders.shipments WHERE created_at < ${CUTOFF};")
+                  SCUT=$(${MYSQL_RO} -e "SELECT COALESCE(MAX(id),0) FROM orders.shipments WHERE created_at < ${CUTOFF};")
                   echo "shipments id cutoff <= ${SCUT}"
                   [ "${SCUT:-0}" -gt 0 ] && { echo "  shipments:"; drain "DELETE FROM orders.shipments WHERE id <= ${SCUT}"; }
 

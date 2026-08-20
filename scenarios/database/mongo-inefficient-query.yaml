@@ -57,7 +57,14 @@ spec:
       workload:
         name: mongo-bad-query
         image: percona/percona-server-mongodb:7.0.39
-        concurrency: 24
+        # A few paced scans, not a stampede: this cluster's WiredTiger cache is only
+        # ~0.5 GB against a ~1 GB collection, so a large burst of simultaneous COLLSCANs
+        # saturates it hard enough to time out the members' health probes and get mongod
+        # restarted - which looks like an outage, not the missing-index latency problem
+        # we want to show. A small concurrency with a pause between scans keeps the
+        # members healthy while still evicting the app's working set and raising read
+        # latency for the review-service that shares these secondaries.
+        concurrency: 3
         env:
           - name: MONGO_USER
             value: reviews
@@ -84,6 +91,10 @@ spec:
                   helpful_count: { $gt: 100000000 },
                 }).toArray();
               } catch (e) {
-                sleep(1000);
+                // brief backoff on error (e.g. a transient election) before retrying
               }
+              // pace the scans: a pause between full-collection scans keeps the members'
+              // cache and health probes from being pinned, so this degrades latency
+              // rather than knocking mongod over
+              sleep(2000);
             }

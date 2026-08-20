@@ -1,9 +1,11 @@
-# A "bad" query is shipped against the reviews collection: it filters and sorts
-# on fields that are not indexed, so MongoDB has to scan every document in the
-# ~1 GB collection to answer it (a COLLSCAN), examining millions of documents to
-# return a handful. Several of these run concurrently, so the primary reads the
-# whole collection from disk over and over — the collection is twice the size of
-# the WiredTiger cache, so it does not fit and the scans hammer the data disk.
+# A "bad" query is shipped against the reviews collection: it filters on fields
+# that are not indexed, so MongoDB has to scan every document in the ~1 GB
+# collection to answer it (a COLLSCAN), examining millions of documents to return
+# a handful. It runs with the SAME read preference as the review-service
+# (secondaryPreferred), so the scans land on the very secondaries the app reads
+# from and contend with it: the collection is twice the size of the WiredTiger
+# cache, so the scans evict the app's hot working set and hammer those members'
+# data disks.
 # This is the single most common MongoDB performance problem: a missing index
 # turns a cheap lookup into a full-collection scan. It is not an outage — the
 # primary is up — but read I/O and operation latency climb for everyone sharing
@@ -28,30 +30,34 @@ spec:
     (~1 GB) is twice the size of the WiredTiger cache (0.5 GB) it does not fit in
     memory, so the scans read the collection from the data disk repeatedly and
     read I/O and operation latency climb for every client sharing the primary,
-    including the review-service. Nothing is down and no data changes; the
-    database is just doing enormous amounts of pointless work because of a missing
-    index. Reverting stops the query workload and the disk load and latency
-    recover; the durable fix would be to add an index covering the filter.
+    including the review-service. Because the scans share the secondaries the
+    review-service reads from and evict its cached working set, review-service
+    read latency climbs and that propagates up to the api-gateway (higher p95/p99
+    on the review endpoints). Nothing is down and no data changes; the database is
+    just doing enormous amounts of pointless work because of a missing index.
+    Reverting stops the query workload and latency recovers; the durable fix would
+    be to add an index covering the filter.
   category: database
   severity: high
   duration: 15m
   expectedSymptoms:
     - a MongoDB query shape shows a huge query-targeting ratio — millions of documents examined per document returned — with a COLLSCAN plan
-    - read I/O on the MongoDB primary's data disk and operation latency (reads, commands) climb while request rates are otherwise normal
-    - review-service latency rises because it shares the primary with the scanning workload; the whole database is slow, driven by one bad query shape
+    - read I/O and operation latency on the MongoDB secondaries serving reads climb while request rates are otherwise normal
+    - review-service read latency rises (its cached working set is evicted by the scans on the same secondaries) and the api-gateway sees higher latency on the review endpoints — the impact propagates up the service map from the bad query
     - the tell is an unindexed query doing full-collection scans (documents examined greatly exceeds documents returned), not a slow disk on its own, a lock, or a connection storm
     - onset and recovery track the query workload; stopping it (or adding the missing index) removes the scans and the latency
   actions:
-    # Concurrent unindexed scans concentrated on the primary (readPreference=primary)
-    # so they load one member's data disk. Credentials are read from process.env
-    # inside the script and never appear on the command line or in the logs.
-    # Deleting the Job on revert stops the queries.
+    # Concurrent unindexed scans on the same read path as the app
+    # (readPreference=secondaryPreferred) so they contend with review-service reads
+    # on the secondaries. Credentials are read from process.env inside the script
+    # and never appear on the command line or in the logs. Deleting the Job on
+    # revert stops the queries.
     - name: bad-query
       type: Workload
       workload:
         name: mongo-bad-query
         image: percona/percona-server-mongodb:7.0.39
-        concurrency: 3
+        concurrency: 16
         env:
           - name: MONGO_USER
             value: reviews
@@ -66,7 +72,7 @@ spec:
           - --quiet
           - --eval
           - |
-            const uri = `mongodb://${process.env.MONGO_USER}:${process.env.MONGO_PW}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&readPreference=primary`;
+            const uri = `mongodb://${process.env.MONGO_USER}:${process.env.MONGO_PW}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&readPreference=secondaryPreferred`;
             const db = Mongo(uri).getDB('reviews');
             while (true) {
               try {

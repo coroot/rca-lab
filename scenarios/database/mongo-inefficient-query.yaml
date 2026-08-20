@@ -57,7 +57,7 @@ spec:
       workload:
         name: mongo-bad-query
         image: percona/percona-server-mongodb:7.0.39
-        concurrency: 16
+        concurrency: 24
         env:
           - name: MONGO_USER
             value: reviews

@@ -1,0 +1,57 @@
+# The MongoDB primary is killed (Chaos Mesh PodChaos pod-kill), forcing the
+# replica set to elect a new primary. This is a real failover, not a simulated
+# one: the pod is genuinely deleted, the remaining two members detect the lost
+# primary and hold an election, one is promoted, and the operator's StatefulSet
+# recreates the killed member, which rejoins as a secondary and catches up. For a
+# short window during the election there is no primary, so writes (and the
+# review-service's create-review calls) fail or block until a new primary is
+# available; reads with readPreference secondaryPreferred keep working. A healthy
+# replica set rides this out in seconds, but the election is a visible event — a
+# primary change and a brief no-primary gap — and repeated or slow elections are
+# a real reliability problem (flapping primary). A good tool should show the
+# election / primary change and the momentary loss of a writable primary.
+# Reverting is a no-op: the killed pod is already coming back on its own.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mongo-primary-failover
+  namespace: default
+spec:
+  displayName: MongoDB primary killed (replica-set failover)
+  description: >-
+    Chaos Mesh deletes the current MongoDB primary pod. The remaining replica-set
+    members detect the lost primary and hold an election, promoting a new primary;
+    the PSMDB operator recreates the killed pod, which rejoins as a secondary and
+    replays the oplog to catch up. During the election there is a brief window
+    with no primary, so writes — including the review-service's create-review
+    requests — fail or block until the new primary is available, while
+    secondaryPreferred reads continue. This exercises the cluster's failover path
+    for real (a genuinely deleted pod, a real election), and surfaces the primary
+    change, the momentary no-primary gap, and the recovering member catching back
+    up. Reverting is a no-op — the pod is already being recreated.
+  category: database
+  severity: high
+  duration: 2m
+  expectedSymptoms:
+    - a MongoDB primary election occurs — the primary changes and there is a brief window with no primary in the replica set
+    - writes and the review-service's create-review requests fail or spike in latency during the no-primary window, then recover once a new primary is elected
+    - secondaryPreferred reads keep working through the failover; the impact is on writes and on anything needing the primary
+    - the killed member briefly shows as unavailable / recovering, then rejoins as a secondary and its replication lag returns to ~0
+    - the event is a real failover (a deleted pod and an election), not a fabricated state; a repeated or slow election would be a flapping-primary reliability problem
+  actions:
+    # Delete the primary pod once. PodChaos recreates nothing on revert — the
+    # StatefulSet brings the member back. PSMDB assigns the primary dynamically (no
+    # role label to select on), so rs0-0 is the primary in the default topology —
+    # verify with rs.status() if a prior failover moved it. Killing a secondary
+    # instead would only restart a member, not trigger an election.
+    - name: kill-primary
+      type: ChaosMesh
+      chaosMesh:
+        kind: PodChaos
+        spec:
+          action: pod-kill
+          mode: one
+          selector:
+            namespaces: [default]
+            pods:
+              default: [mongodb-rs0-0]

@@ -43,9 +43,11 @@ spec:
   actions:
     # Degrade one secondary's data disk. Chaos Mesh's own duration is set by the
     # operator as a dead-man switch, so the fault self-heals if the operator dies.
-    # The member is selected by name; PSMDB keeps the primary stable, so rs0-0 is
-    # a secondary for the run (and even if it were promoted, a slow disk on any
-    # single member is a valid fault).
+    # The member is selected by name. PSMDB assigns the primary dynamically (no role
+    # label to select on); rs0-1 is a secondary in the default topology. If a prior
+    # failover promoted it, verify roles with rs.status() — a slow disk on any single
+    # member is still a valid fault, the observed effect just shifts (a primary would
+    # saturate rather than lag).
     - name: secondary-disk-latency
       type: ChaosMesh
       chaosMesh:
@@ -56,7 +58,7 @@ spec:
           selector:
             namespaces: [default]
             pods:
-              default: [mongodb-rs0-0]
+              default: [mongodb-rs0-1]
           containerNames: [mongod]
           volumePath: /data/db
           path: /data/db/**

@@ -6,6 +6,7 @@ resources:
   - database/pg-exclusive-lock.yaml
   - database/mysql-analytics-queries.yaml
   - database/mysql-lock-contention.yaml
+  - database/mongo-primary-failover.yaml
   - deploy/order-service-gc-regression.yaml
   - deploy/order-service-memory-leak.yaml
   - deploy/product-catalog-gc-pressure.yaml

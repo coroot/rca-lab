@@ -62,6 +62,7 @@ spec:
                 key: reviews
         command:
           - mongosh
+          - --nodb
           - --quiet
           - --eval
           - |

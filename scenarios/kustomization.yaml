@@ -20,6 +20,5 @@ resources:
   - reliability/pg-stale-statistics.yaml
   - reliability/pg-vacuum-blocked.yaml
   - reliability/pg-replication-lag.yaml
-  - reliability/mongo-replication-lag.yaml
   - database/mongo-inefficient-query.yaml
   - reliability/pg-checkpointer.yaml

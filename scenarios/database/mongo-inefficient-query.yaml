@@ -57,14 +57,15 @@ spec:
       workload:
         name: mongo-bad-query
         image: percona/percona-server-mongodb:7.0.39
-        # A few paced scans, not a stampede: this cluster's WiredTiger cache is only
-        # ~0.5 GB against a ~1 GB collection, so a large burst of simultaneous COLLSCANs
-        # saturates it hard enough to time out the members' health probes and get mongod
-        # restarted - which looks like an outage, not the missing-index latency problem
-        # we want to show. A small concurrency with a pause between scans keeps the
-        # members healthy while still evicting the app's working set and raising read
-        # latency for the review-service that shares these secondaries.
-        concurrency: 3
+        # Enough concurrent scans to make the missing-index problem show up as
+        # LATENCY, not an outage. The scans evict the review-service's working set
+        # from the shared ~0.5 GB WiredTiger cache and compete for CPU on the
+        # secondaries it reads from, so review-service p99 roughly doubles and that
+        # propagates to the api-gateway - while the members stay healthy (the
+        # tolerant health probes in deploy/databases/mongodb.yaml keep a busy-but-
+        # alive member in the replica set instead of flapping it out, which would
+        # otherwise turn this into a fake instability incident).
+        concurrency: 10
         env:
           - name: MONGO_USER
             value: reviews
@@ -93,8 +94,7 @@ spec:
               } catch (e) {
                 // brief backoff on error (e.g. a transient election) before retrying
               }
-              // pace the scans: a pause between full-collection scans keeps the members'
-              // cache and health probes from being pinned, so this degrades latency
-              // rather than knocking mongod over
-              sleep(2000);
+              // small pause between scans so the load is sustained pressure rather
+              // than an all-out CPU pin
+              sleep(1000);
             }

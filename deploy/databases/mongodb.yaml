@@ -35,11 +35,31 @@ spec:
           maxIncomingConnections: 500
       resources:
         requests:
-          cpu: 250m
+          # Guarantee a full core so the health-check's authentication and the
+          # replication heartbeats still get CPU while mongod is busy serving a
+          # heavy query (e.g. the inefficient-query scenario's collection scans).
+          cpu: "1"
           memory: 1Gi
         limits:
           cpu: "2"
           memory: 2Gi
+      # A member that is busy serving a slow query is still alive. The default
+      # probes are tight enough that a sustained collection scan times out the
+      # health check, the member is marked not-ready and drops out of the
+      # headless service, and clients see connection/DNS failures - so a
+      # missing-index *latency* problem masquerades as replica-set instability
+      # and the RCA blames the instability instead of the query. These tolerant
+      # probes keep a busy-but-alive member in the set. Failover detection is
+      # unaffected: a pod-kill deletes the pod, so its DNS record is removed
+      # regardless of the failure threshold.
+      livenessProbe:
+        timeoutSeconds: 15
+        periodSeconds: 30
+        failureThreshold: 6
+      readinessProbe:
+        timeoutSeconds: 10
+        periodSeconds: 10
+        failureThreshold: 6
       volumeSpec:
         persistentVolumeClaim:
           accessModes: ["ReadWriteOnce"]

@@ -15,7 +15,7 @@
 #     so they never churn the writer node's buffer pool / CPU. Cheap anyway —
 #     orders/shipments/payments are all indexed on created_at (idx_*_created_at,
 #     created by data-seeder), so each cutoff is a small range scan.
-#   * Small write-sets (BATCH=2000): a big DELETE replicates as one Galera
+#   * Small write-sets (BATCH=1000): a big DELETE replicates as one Galera
 #     write-set that every node must certify+apply; while the slowest applier's
 #     queue backs up the cluster pauses ALL commits (flow control), stalling
 #     live INSERTs. Small batches keep each write-set tiny.
@@ -30,7 +30,7 @@ metadata:
   labels:
     app: mysql-retention
 spec:
-  schedule: "17 * * * *"        # hourly, off the top of the hour
+  schedule: "17 */4 * * *"      # every 4h at :17 - infrequent + gentle enough to stay below the anomaly detector
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 2
@@ -53,11 +53,11 @@ spec:
                 - name: RETENTION_DAYS
                   value: "7"
                 - name: BATCH               # small write-sets → minimal Galera flow control
-                  value: "2000"
+                  value: "1000"
                 - name: MAX_BATCHES         # cap deletions per table per run (400k) so a backlog catches up gradually
-                  value: "200"
-                - name: SLEEP               # base pause between batches
-                  value: "0.5"
+                  value: "400"
+                - name: SLEEP               # base pause between batches; BATCH/SLEEP keeps delete throughput
+                  value: "1.0"              # ~900 rows/s (was ~3600) so the run doesn't spike app latency
                 - name: FC_SLEEP            # longer pause after a batch that made the cluster pause on flow control
                   value: "3"
                 - name: MYSQL_HOST          # writer HAProxy: DELETEs + flow-control status

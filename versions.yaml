@@ -13,7 +13,7 @@ services:
   inventory-service: 1.0.3     # perf: persistent conns, opcache tuning, optimized autoloader
   recommendation-service: 1.0.0
   fulfillment-service: 1.0.2   # idx_shipments_created_at for cheap retention cutoffs
-  load-generator: 1.0.0
+  load-generator: 1.1.0         # per-service RPS override (RPS_OVERRIDES)
   data-seeder: 1.0.6          # created_at indexes on orders + shipments for retention cutoffs
   operator: 1.4.0             # UI: group scenarios by category + severity column
 

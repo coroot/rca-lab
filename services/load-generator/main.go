@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,7 +23,12 @@ import (
 var (
 	gatewayURL = getEnv("GATEWAY_URL", "http://api-gateway:8080")
 	rpsPerSvc  = getEnvInt("RPS_PER_SERVICE", 20)
-	client     = &http.Client{
+	// RPS_OVERRIDES lets a specific service be driven at a different rate than the
+	// uniform RPS_PER_SERVICE, e.g. "review-service:80" to make it a larger share
+	// of the gateway's traffic (so a problem in its dependency is visible upstream).
+	// Format: comma-separated "service:rps" pairs.
+	rpsOverrides = parseRPSOverrides(getEnv("RPS_OVERRIDES", ""))
+	client       = &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: otelhttp.NewTransport(&http.Transport{
 			MaxIdleConns:        200,
@@ -51,6 +57,35 @@ func getEnvInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// parseRPSOverrides parses "svc1:rps1,svc2:rps2" into a map. Malformed entries
+// are skipped.
+func parseRPSOverrides(s string) map[string]int {
+	m := map[string]int{}
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		name, rps, ok := strings.Cut(pair, ":")
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(rps)); err == nil && n >= 0 {
+			m[strings.TrimSpace(name)] = n
+		}
+	}
+	return m
+}
+
+// rpsFor returns the request rate for a service: its override if set, else the
+// uniform default.
+func rpsFor(service string) int {
+	if n, ok := rpsOverrides[service]; ok {
+		return n
+	}
+	return rpsPerSvc
 }
 
 type scenario struct {
@@ -528,7 +563,7 @@ func main() {
 
 	for _, svc := range services {
 		wg.Add(1)
-		go runServiceLoad(svc, rpsPerSvc, &wg)
+		go runServiceLoad(svc, rpsFor(svc.name), &wg)
 	}
 
 	// Stats reporter

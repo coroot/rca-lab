@@ -1,57 +1,94 @@
-# The MongoDB primary is killed (Chaos Mesh PodChaos pod-kill), forcing the
-# replica set to elect a new primary. This is a real failover, not a simulated
-# one: the pod is genuinely deleted, the remaining two members detect the lost
-# primary and hold an election, one is promoted, and the operator's StatefulSet
-# recreates the killed member, which rejoins as a secondary and catches up. For a
+# Forces the MongoDB replica set to fail over by stepping down the current
+# primary (replSetStepDown, force). This is a real election, not a simulated
+# one: the acting primary relinquishes, the remaining members hold an election,
+# one is promoted, and the stepped-down member rejoins as a secondary. For a
 # short window during the election there is no primary, so writes (and the
 # review-service's create-review calls) fail or block until a new primary is
-# available; reads with readPreference secondaryPreferred keep working. A healthy
-# replica set rides this out in seconds, but the election is a visible event — a
-# primary change and a brief no-primary gap — and repeated or slow elections are
-# a real reliability problem (flapping primary). A good tool should show the
-# election / primary change and the momentary loss of a writable primary.
-# Reverting is a no-op: the killed pod is already coming back on its own.
+# available; reads with readPreference secondaryPreferred keep working. Doing it
+# by step-down rather than by killing a fixed pod is deliberate: PSMDB assigns
+# the primary dynamically and exposes no role label, so a pod-kill by name lands
+# on a secondary (and does nothing) whenever a prior failover has moved the
+# primary. Step-down always targets whoever is primary right now, and looping it
+# produces repeated elections - the flapping-primary reliability problem a good
+# tool should surface (primary changes, brief no-primary gaps). Reverting deletes
+# the job; the last-elected primary simply stays.
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
   name: mongo-primary-failover
   namespace: default
 spec:
-  displayName: MongoDB primary killed (replica-set failover)
+  displayName: MongoDB primary step-down (replica-set failover)
   description: >-
-    Chaos Mesh deletes the current MongoDB primary pod. The remaining replica-set
-    members detect the lost primary and hold an election, promoting a new primary;
-    the PSMDB operator recreates the killed pod, which rejoins as a secondary and
-    replays the oplog to catch up. During the election there is a brief window
-    with no primary, so writes — including the review-service's create-review
-    requests — fail or block until the new primary is available, while
-    secondaryPreferred reads continue. This exercises the cluster's failover path
-    for real (a genuinely deleted pod, a real election), and surfaces the primary
-    change, the momentary no-primary gap, and the recovering member catching back
-    up. Reverting is a no-op — the pod is already being recreated.
+    Repeatedly steps down the current MongoDB primary (replSetStepDown, force),
+    forcing the replica set to elect a new one each time. Each step-down is a real
+    election: the acting primary relinquishes, a secondary is promoted, and the
+    former primary rejoins and replays the oplog to catch up. During each election
+    there is a brief window with no primary, so writes - including the
+    review-service's create-review requests - fail or block until the new primary
+    is available, while secondaryPreferred reads continue. Unlike killing a fixed
+    pod by name (which lands on a secondary once the dynamic primary has moved, and
+    then does nothing), stepping down always targets whoever is primary now, and
+    looping it surfaces the flapping-primary reliability problem: primary changes
+    and repeated no-primary gaps. Reverting stops the workload; the current primary
+    stays put.
   category: database
   severity: high
-  duration: 2m
+  duration: 5m
   expectedSymptoms:
-    - a MongoDB primary election occurs — the primary changes and there is a brief window with no primary in the replica set
-    - writes and the review-service's create-review requests fail or spike in latency during the no-primary window, then recover once a new primary is elected
-    - secondaryPreferred reads keep working through the failover; the impact is on writes and on anything needing the primary
-    - the killed member briefly shows as unavailable / recovering, then rejoins as a secondary and its replication lag returns to ~0
-    - the event is a real failover (a deleted pod and an election), not a fabricated state; a repeated or slow election would be a flapping-primary reliability problem
+    - MongoDB primary elections occur repeatedly - the primary changes and there is a brief window with no primary in the replica set each time
+    - writes and the review-service's create-review requests fail or spike in latency during each no-primary window, then recover once a new primary is elected
+    - secondaryPreferred reads keep working through the failovers; the impact is on writes and on anything needing the primary
+    - the stepped-down member briefly leaves the PRIMARY state, then rejoins as a secondary and its replication lag returns to ~0
+    - the tell is a genuine election (a primary change), not a fabricated state; repeated elections are a flapping-primary reliability problem
   actions:
-    # Delete the primary pod once. PodChaos recreates nothing on revert — the
-    # StatefulSet brings the member back. PSMDB assigns the primary dynamically (no
-    # role label to select on), so rs0-0 is the primary in the default topology —
-    # verify with rs.status() if a prior failover moved it. Killing a secondary
-    # instead would only restart a member, not trigger an election.
-    - name: kill-primary
-      type: ChaosMesh
-      chaosMesh:
-        kind: PodChaos
-        spec:
-          action: pod-kill
-          mode: one
-          selector:
-            namespaces: [default]
-            pods:
-              default: [mongodb-rs0-0]
+    # Loop replSetStepDown against the replica set. The driver routes the admin
+    # command to whoever is primary now, so this always hits the real primary
+    # regardless of which pod it landed on. Credentials (the operator's built-in
+    # clusterAdmin user, which holds replSetStepDown) are read from process.env
+    # inside the script and never appear on the command line or in the logs.
+    # Deleting the Job on revert stops the step-downs.
+    - name: step-down-primary
+      type: Workload
+      workload:
+        name: mongo-failover
+        image: percona/percona-server-mongodb:7.0.39
+        concurrency: 1
+        env:
+          - name: MONGO_USER
+            valueFrom:
+              secretKeyRef:
+                name: internal-mongodb-users
+                key: MONGODB_CLUSTER_ADMIN_USER
+          - name: MONGO_PW
+            valueFrom:
+              secretKeyRef:
+                name: internal-mongodb-users
+                key: MONGODB_CLUSTER_ADMIN_PASSWORD
+        command:
+          - mongosh
+          - --nodb
+          - --quiet
+          - --eval
+          - |
+            const u = encodeURIComponent(process.env.MONGO_USER);
+            const p = encodeURIComponent(process.env.MONGO_PW);
+            const uri = `mongodb://${u}:${p}@mongodb-rs0:27017/admin?replicaSet=rs0&authSource=admin`;
+            while (true) {
+              try {
+                // step the current primary down for 30s (it can't re-win during that
+                // window) and don't wait more than 5s for a secondary to catch up, so
+                // an election happens promptly. force:true so it steps down even if no
+                // secondary is fully caught up.
+                Mongo(uri).getDB('admin').adminCommand({
+                  replSetStepDown: 30,
+                  secondaryCatchUpPeriodSecs: 5,
+                  force: true,
+                });
+              } catch (e) {
+                // stepDown closes the connection on success - expected
+              }
+              // pace the failovers: one election roughly every 45s so the replica set
+              // fully recovers between them (elections are visible but not a permanent outage)
+              sleep(45000);
+            }

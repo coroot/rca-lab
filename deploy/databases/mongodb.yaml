@@ -33,6 +33,18 @@ spec:
               cacheSizeGB: 0.5
         net:
           maxIncomingConnections: 500
+        # Enable the database profiler persistently so Coroot can collect
+        # per-query statistics (the top-queries view / bad-query inspection).
+        # Setting it at runtime (db.setProfilingLevel) does NOT survive a mongod
+        # restart, so it belongs in the CR config. Percona Server for MongoDB can
+        # sample: mode "all" profiles every operation but rateLimit 100 records
+        # only 1 in 100, keeping the overhead bounded while still giving a
+        # representative sample of the normal (fast, indexed) query shapes - not
+        # just the slow ones a plain slowOp threshold would catch.
+        operationProfiling:
+          mode: all
+          slowOpThresholdMs: 200
+          rateLimit: 100
       resources:
         requests:
           # Guarantee a full core so the health-check's authentication and the

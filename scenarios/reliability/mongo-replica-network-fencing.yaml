@@ -44,7 +44,7 @@ spec:
     network path to the member (latency), not the database engine - its own CPU,
     disk, tickets and cache are fine. Reverting removes the latency and stops the
     writes; the member replays the backlog and lag returns to ~0.
-  category: database
+  category: reliability
   severity: high
   duration: 20m
   expectedSymptoms:

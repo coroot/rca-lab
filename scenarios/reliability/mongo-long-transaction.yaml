@@ -43,7 +43,7 @@ spec:
     lag (that needs a prepared/distributed transaction, which a client cannot drive
     on a non-sharded replica set). Reverting aborts the transaction and releases
     the locks.
-  category: database
+  category: reliability
   severity: medium
   duration: 20m
   expectedSymptoms:

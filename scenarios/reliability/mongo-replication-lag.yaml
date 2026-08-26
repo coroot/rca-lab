@@ -53,7 +53,7 @@ spec:
     failover safety margin shrinks. The workload always targets whoever is a
     secondary now, never the primary, so it can never stall cluster-wide writes,
     and it unlocks the member it locked when the scenario is reverted.
-  category: database
+  category: reliability
   severity: high
   duration: 15m
   expectedSymptoms:

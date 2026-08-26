@@ -1,0 +1,107 @@
+# Holds a long-running multi-document transaction open on the primary from a
+# single client (appName "long-txn"). The transaction writes to a set of
+# documents - taking and holding their locks and pinning a WiredTiger snapshot -
+# and then just sits, open and uncommitted, for minutes before aborting and
+# starting again. Coroot surfaces it as an open transaction attributed to its
+# client application (mongo_open_transactions{app="long-txn"}), which is exactly
+# the "a long transaction is holding locks" lock-holder that the replication-lag
+# and saturation inspections point at.
+#
+# What it does and does not do (be precise): a long OPEN transaction on a replica
+# set holds locks and pins the read snapshot on the PRIMARY. Any operation that
+# conflicts with the locked documents queues behind it (a lock wait, which can
+# show up as saturation - queued on a lock while WiredTiger tickets are still
+# free), and the pinned snapshot keeps WiredTiger from discarding old versions
+# (cache/history pressure). It does NOT by itself make a SECONDARY lag: only a
+# PREPARED transaction holds locks on secondaries and blocks their oplog applier,
+# and a client cannot drive a transaction into the prepared state on a plain
+# (non-sharded) replica set - prepare is an internal, distributed-commit step. So
+# this scenario reproduces the client-visible lock-holder signal (detected and
+# attributed by client), not secondary lag; the fsyncLock and network-fencing
+# scenarios cover the lag paths.
+#
+# Reverting deletes the Job, which drops the connection and aborts the
+# transaction, releasing the locks and the snapshot. Credentials are read from
+# process.env inside mongosh and never appear on the command line or in the logs.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mongo-long-transaction
+  namespace: default
+spec:
+  displayName: MongoDB long-running open transaction (lock holder)
+  description: >-
+    A single client (appName "long-txn") opens a multi-document transaction on the
+    primary, writes to a set of documents, and holds the transaction open and
+    uncommitted for minutes before aborting and restarting. Coroot reports it as an
+    open transaction attributed to that client application - the "long transaction
+    holding locks" that the replication-lag and saturation inspections name as a
+    possible lock holder. While it is open it holds the documents' locks (so
+    conflicting operations queue behind it - a lock wait, not a ticket shortage)
+    and pins a WiredTiger read snapshot (cache/history pressure). Note that a plain
+    open transaction holds locks on the primary only; it does not make a secondary
+    lag (that needs a prepared/distributed transaction, which a client cannot drive
+    on a non-sharded replica set). Reverting aborts the transaction and releases
+    the locks.
+  category: database
+  severity: medium
+  duration: 20m
+  expectedSymptoms:
+    - an open transaction is attributed to the client application "long-txn" and persists for minutes at a time (mongo_open_transactions by client)
+    - operations that touch the same documents queue behind the transaction's locks - a lock wait (queued on a lock while WiredTiger tickets remain available), not a ticket shortage
+    - the transaction pins a WiredTiger read snapshot, so old document versions cannot be discarded (cache / history-store pressure) while it stays open
+    - the primary stays up and replication is unaffected - a plain open transaction holds locks on the primary only and does not make a secondary lag
+    - the tell is a single client holding a transaction open far too long; reverting (aborting it) releases the locks and the snapshot immediately
+  actions:
+    # Open a transaction as appName "long-txn", write a set of documents to hold
+    # their locks and pin a snapshot, then hold the transaction open. Loop with a
+    # bounded hold + abort so a leaked transaction never lingers indefinitely, and
+    # so Job deletion (revert) aborts promptly.
+    - name: hold-open-transaction
+      type: Workload
+      workload:
+        name: mongo-long-txn
+        image: percona/percona-server-mongodb:7.0.39
+        concurrency: 1
+        env:
+          - name: MONGO_USER
+            value: reviews
+          - name: MONGO_PW
+            valueFrom:
+              secretKeyRef:
+                name: mongodb-custom-user-secret
+                key: reviews
+        command:
+          - mongosh
+          - --nodb
+          - --quiet
+          - --eval
+          - |
+            const u = encodeURIComponent(process.env.MONGO_USER);
+            const p = encodeURIComponent(process.env.MONGO_PW);
+            // appName=long-txn so Coroot can attribute the open transaction to this client
+            const uri = `mongodb://${u}:${p}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&appName=long-txn`;
+            const conn = Mongo(uri);
+            const coll = conn.getDB('reviews').getCollection('long_txn_lock');
+            // seed a few documents to lock inside the transaction
+            try { coll.insertMany([{_id:1,v:0},{_id:2,v:0},{_id:3,v:0}], {writeConcern:{w:'majority'}}); } catch (e) {}
+            while (true) {
+              const s = conn.startSession();
+              try {
+                s.startTransaction({ readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
+                const c = s.getDatabase('reviews').getCollection('long_txn_lock');
+                // write inside the transaction: takes and holds these documents' locks
+                c.updateOne({ _id: 1 }, { $inc: { v: 1 } });
+                c.updateOne({ _id: 2 }, { $inc: { v: 1 } });
+                c.updateOne({ _id: 3 }, { $inc: { v: 1 } });
+                // hold the transaction open, uncommitted, so the locks and the
+                // pinned snapshot persist and Coroot sees a long open transaction
+                sleep(300000); // ~5 minutes
+                s.abortTransaction();
+              } catch (e) {
+                try { s.abortTransaction(); } catch (e2) {}
+              } finally {
+                try { s.endSession(); } catch (e3) {}
+              }
+              sleep(2000);
+            }

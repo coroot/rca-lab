@@ -44,7 +44,7 @@ spec:
     its window. Nothing is down and no application data is harmed - the scratch
     collection is capped and bounded on disk. Reverting stops the churn; the oplog
     window then rebuilds gradually as normal writes age the burst entries out.
-  category: database
+  category: reliability
   severity: high
   duration: 30m
   expectedSymptoms:

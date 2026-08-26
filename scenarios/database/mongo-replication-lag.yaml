@@ -1,0 +1,142 @@
+# Holds one replica-set SECONDARY behind the primary for the whole run, so its
+# replication lag climbs and STAYS above the threshold - a sustained "replica
+# falling behind" incident, not a blip. The mechanism is db.fsyncLock(): it
+# flushes and holds a global lock that blocks writes on that member, including
+# the oplog applier, so the member's applied optime stops advancing while the
+# primary keeps moving (client writes plus the ~10s periodic no-op writer). The
+# gap between the primary's optime and the frozen secondary's optime IS the
+# replication lag; held continuously it grows without bound (still far short of
+# the ~21h oplog window, so no resync is needed), and Coroot's per-member
+# replication-lag check stays red long enough (>2m continuous) to raise the
+# alert.
+#
+# This is a reliability risk, not an outage: the primary is healthy and writes
+# commit normally, the locked member stays SECONDARY, reachable and voting (no
+# election, no availability alert), but its reads (the review-service reads
+# secondaryPreferred) return increasingly stale data and it becomes a worse
+# failover candidate - a failover now would lose the un-replayed writes. Unlike
+# killing or partitioning a member (which reads as instability), fsyncLock
+# isolates the pure replication-lag signal on a member that is otherwise
+# perfectly healthy.
+#
+# Safety: the workload never locks the primary - it reads replSetGetStatus, picks
+# a member that is currently SECONDARY, and locks THAT one directly, so a
+# fsyncLock can never stall cluster-wide writes (and a lagging locked member
+# cannot win an election, so it stays a secondary). Cleanup is guaranteed on a
+# normal revert: the process traps SIGTERM/SIGINT and runs fsyncUnlock on the
+# member it locked before exiting, and it records the locked host in a file so
+# the trap always knows which member to release. Only a hard SIGKILL (e.g. node
+# loss) could leave a member locked; to release it manually:
+#   kubectl exec mongodb-rs0-<n> -c mongod -- mongosh -u <clusterAdmin> -p <pw> \
+#     --authenticationDatabase admin --eval 'db.fsyncUnlock()'
+# (a mongod restart also clears it - the lock is in-memory only). Credentials are
+# read from process.env inside mongosh and never appear on the command line or in
+# the logs.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mongo-replication-lag
+  namespace: default
+spec:
+  displayName: MongoDB secondary falling behind (frozen oplog apply)
+  description: >-
+    Freezes oplog application on one replica-set secondary with db.fsyncLock() for
+    the whole run, so it stops replaying the primary's writes and its applied
+    optime falls behind. Replication lag for that member climbs past the 30s
+    threshold within a minute and keeps growing while the lock is held, so
+    Coroot's per-member replication-lag check stays red and raises the alert;
+    releasing the member on revert lets it replay the backlog and lag returns to
+    ~0. The primary stays healthy and writes commit normally; the locked member
+    stays SECONDARY, reachable and voting, so there is no election and no outage -
+    the only problem is that this member is increasingly behind, so its reads (the
+    review-service reads secondaryPreferred) return stale data and the cluster's
+    failover safety margin shrinks. The workload always targets whoever is a
+    secondary now, never the primary, so it can never stall cluster-wide writes,
+    and it unlocks the member it locked when the scenario is reverted.
+  category: database
+  severity: high
+  duration: 15m
+  expectedSymptoms:
+    - replication lag for one MongoDB secondary rises past 30s and stays there (climbing) for the whole run while the primary stays healthy and writes commit normally
+    - the lagging member stays SECONDARY, reachable and voting - there is no election and no availability alert; the problem is isolated to this member falling behind
+    - reads served by the lagging secondary (the review-service reads secondaryPreferred) return increasingly stale data, and the cluster's failover safety margin shrinks
+    - the tell is a single member's applied optime frozen relative to the primary (blocked oplog apply), not a slow disk, a lock storm on the primary, or a connection problem
+    - onset and recovery track the scenario; releasing the member lets it replay the backlog and lag returns to ~0
+  actions:
+    # Lock a current SECONDARY (never the primary) to freeze its oplog apply, hold
+    # it for the run, and unlock on revert via a SIGTERM trap. Credentials are the
+    # operator's built-in clusterAdmin user (its clusterAdmin role includes
+    # hostManager, which grants the fsync/unlock privileges), read from
+    # process.env inside mongosh.
+    - name: freeze-secondary-apply
+      type: Workload
+      workload:
+        name: mongo-replication-lag
+        image: percona/percona-server-mongodb:7.0.39
+        concurrency: 1
+        env:
+          - name: MONGO_USER
+            valueFrom:
+              secretKeyRef:
+                name: internal-mongodb-users
+                key: MONGODB_CLUSTER_ADMIN_USER
+          - name: MONGO_PW
+            valueFrom:
+              secretKeyRef:
+                name: internal-mongodb-users
+                key: MONGODB_CLUSTER_ADMIN_PASSWORD
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -u
+            TF=/tmp/locked_host   # records which member we locked, for the trap
+
+            # pick a current SECONDARY and fsyncLock it; prints "HOST=<host>" (empty if none)
+            pick_and_lock() {
+              mongosh --nodb --quiet --eval '
+                const u = encodeURIComponent(process.env.MONGO_USER);
+                const p = encodeURIComponent(process.env.MONGO_PW);
+                const rs = `mongodb://${u}:${p}@mongodb-rs0:27017/admin?replicaSet=rs0&authSource=admin`;
+                let host = "";
+                try {
+                  const s = Mongo(rs).getDB("admin").adminCommand({ replSetGetStatus: 1 });
+                  const sec = s.members.find(m => m.stateStr === "SECONDARY"); // never the primary
+                  if (sec) host = sec.name;
+                } catch (e) {}
+                if (host) {
+                  try { Mongo(`mongodb://${u}:${p}@${host}/admin?authSource=admin&directConnection=true`).getDB("admin").fsyncLock(); }
+                  catch (e) { host = ""; }
+                }
+                print("HOST=" + host);
+              ' 2>/dev/null | grep -oE 'HOST=[^[:space:]]*' | tail -1 | cut -d= -f2
+            }
+
+            # unlock whatever host we recorded (best-effort, idempotent)
+            unlock() {
+              local h; h=$(cat "$TF" 2>/dev/null) || return 0
+              [ -z "$h" ] && return 0
+              MONGO_TARGET="$h" mongosh --nodb --quiet --eval '
+                const u = encodeURIComponent(process.env.MONGO_USER);
+                const p = encodeURIComponent(process.env.MONGO_PW);
+                try { Mongo(`mongodb://${u}:${p}@${process.env.MONGO_TARGET}/admin?authSource=admin&directConnection=true`).getDB("admin").fsyncUnlock(); } catch (e) {}
+              ' >/dev/null 2>&1 || true
+            }
+
+            cleanup() { unlock; exit 0; }
+            trap cleanup TERM INT   # revert deletes the Job -> SIGTERM -> unlock
+
+            : > "$TF"
+            H=$(pick_and_lock)
+            if [ -n "$H" ]; then echo "$H" > "$TF"; echo "locked secondary $H"; else echo "no secondary available to lock yet"; fi
+
+            # hold the lock for the whole run; the trap unlocks on revert. If we
+            # somehow never locked (or the member changed), keep trying so the
+            # scenario is self-recovering. sleep is backgrounded + waited so the
+            # SIGTERM trap fires promptly instead of after the full sleep.
+            while true; do
+              if [ ! -s "$TF" ]; then
+                H=$(pick_and_lock); [ -n "$H" ] && { echo "$H" > "$TF"; echo "locked secondary $H"; }
+              fi
+              sleep 10 & wait $!
+            done

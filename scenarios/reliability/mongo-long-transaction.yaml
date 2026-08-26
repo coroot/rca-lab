@@ -45,7 +45,7 @@ spec:
     the locks.
   category: reliability
   severity: medium
-  duration: 20m
+  duration: 15m
   expectedSymptoms:
     - an open transaction is attributed to the client application "long-txn" and persists for minutes at a time (mongo_open_transactions by client)
     - operations that touch the same documents queue behind the transaction's locks - a lock wait (queued on a lock while WiredTiger tickets remain available), not a ticket shortage

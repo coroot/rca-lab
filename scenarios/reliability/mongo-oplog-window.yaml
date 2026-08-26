@@ -46,7 +46,7 @@ spec:
     window then rebuilds gradually as normal writes age the burst entries out.
   category: reliability
   severity: high
-  duration: 30m
+  duration: 15m
   expectedSymptoms:
     - the MongoDB oplog window drops from many hours to a few minutes and stays there while the scenario runs, well under the safe threshold
     - the collapse is driven by oplog write throughput (bytes/second), not operation count - a small number of large writes per second churns the fixed-size oplog

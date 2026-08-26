@@ -1,0 +1,21 @@
+# Exposes the rca-lab operator's Failure Scenarios web UI (container port 8080)
+# on a fixed NodePort so it can be reached from outside the cluster without a
+# port-forward. Separate from the operator's ClusterIP Service so the internal
+# service (and its health/metrics ports) is left untouched.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rca-lab-operator-ui
+  namespace: default
+  labels:
+    app: rca-lab-operator
+    component: ui
+spec:
+  type: NodePort
+  selector:
+    app: rca-lab-operator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080

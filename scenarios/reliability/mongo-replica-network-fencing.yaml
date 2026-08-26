@@ -1,124 +1,80 @@
-# Fences one replica-set member off from its peers at the network layer: Chaos
-# Mesh injects a large (~2s) latency on mongodb-rs0-0's traffic to the other two
-# mongod pods, so it can no longer pull the oplog fast enough to keep up. A write
-# workload on the primary produces a steady oplog stream, and because rs0-0's link
-# to the primary is throttled it falls further and further behind: replication lag
-# climbs past the 30s threshold and keeps growing while the fence is in place.
+# Fences one replica-set member off the network: Chaos Mesh fully partitions
+# mongodb-rs0-0 from the other two mongod pods, so it can neither pull the oplog
+# nor exchange heartbeats with them. This is a replication FAILURE, not just lag:
+# the member stops replicating entirely, the primary reports it as "(not
+# reachable/healthy)", and if it stays fenced longer than the oplog window it
+# falls off the oplog and needs a full initial resync. The other two members keep
+# a majority (2 of 3) so the replica set stays writable - only the fenced member
+# is cut out.
 #
-# This is the network-caused sibling of the fsyncLock scenario: there the applier
-# is blocked by a lock; here it is starved by a slow link. The member stays a
-# reachable, voting SECONDARY (heartbeats still get through the delay, so there is
-# no election and no availability alert) - it just applies the oplog slower than
-# the primary produces it, so its reads (the review-service reads
-# secondaryPreferred) go stale and a failover now would lose the un-replayed
-# writes. A good tool should attribute the lag to the network path (a slow/fenced
-# link), not to the database engine.
+# The partition is scoped to the mongod pods (app.kubernetes.io/replset=rs0), so
+# it cuts the replication/heartbeat path between members but NOT the Coroot
+# agent's scrape path - the primary still reports the fenced member's state, so
+# the failure stays visible. Coroot's availability check flags "member
+# mongodb-rs0-0 is not reachable from the primary ... cannot replicate ... will
+# require a full resync", distinguishing a fenced/failed member from one that is
+# merely lagging (the fsyncLock scenario covers the lag case).
 #
-# The mechanism is a real Chaos Mesh network condition (netem), not a fabricated
-# metric, and it self-heals: Chaos Mesh's own duration is a dead-man switch, so
-# the fault clears if the operator dies, and reverting removes the latency and
-# stops the write load - rs0-0 then replays the backlog and catches up.
+# The mechanism is a real Chaos Mesh network partition (not a fabricated metric)
+# and self-heals: Chaos Mesh's duration is a dead-man switch, so the fence clears
+# if the operator dies, and reverting removes the partition - the member re-syncs
+# from the oplog and rejoins as a healthy SECONDARY (a full resync only if it was
+# fenced longer than the oplog window).
 #
 # NOTE: PSMDB exposes no primary/secondary role label, so the fence targets a
 # fixed pod (mongodb-rs0-0). Run it from steady state, when rs0-0 is a secondary;
-# if a prior failover has made rs0-0 the primary, throttling its egress would slow
-# replication to everyone instead of fencing one member - stop it and re-run once
-# roles have settled.
+# if a prior failover made rs0-0 the primary, fencing it forces an election first
+# (the other two elect a new primary) and then rs0-0 rejoins fenced as a
+# secondary - correct, but noisier. Re-run once roles have settled.
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
   name: mongo-replica-network-fencing
   namespace: default
 spec:
-  displayName: MongoDB secondary fenced by a slow network link (replication lag)
+  displayName: MongoDB secondary fenced off the network (replication failure)
   description: >-
-    Chaos Mesh adds ~2s of latency (with jitter) to one MongoDB secondary's
-    (mongodb-rs0-0) traffic to the other replica-set members, throttling its oplog
-    fetch, while a write workload on the primary produces a steady oplog stream.
-    Because its link is slow, the fenced member cannot replay fast enough and its
-    replication lag climbs past 30s and keeps growing for the whole run - so
-    Coroot's per-member replication-lag check fires. The primary stays healthy and
-    writes commit normally; the fenced member stays a reachable, voting SECONDARY
-    (no election, no outage), it is just increasingly behind, so its reads return
-    stale data and the cluster's failover safety margin shrinks. The tell is the
-    network path to the member (latency), not the database engine - its own CPU,
-    disk, tickets and cache are fine. Reverting removes the latency and stops the
-    writes; the member replays the backlog and lag returns to ~0.
+    Chaos Mesh fully partitions one MongoDB member (mongodb-rs0-0) from the other
+    two mongod pods, cutting both its oplog-replication and heartbeat paths. The
+    member stops replicating entirely: the primary reports it as not reachable, and
+    if it stays fenced longer than the oplog window it will need a full initial
+    resync. This is a replication failure, not lag - the fsyncLock scenario covers
+    the lag case. The other two members keep a majority, so the replica set stays
+    writable and the primary is unaffected; only the fenced member is cut out, and
+    reads with readPreference secondaryPreferred that would have gone to it move to
+    the remaining members. Coroot flags the unreachable member and the resync risk.
+    Reverting removes the partition and the member catches back up from the oplog
+    (a full resync only if it was out longer than the oplog window).
   category: reliability
   severity: high
-  duration: 20m
+  duration: 15m
   expectedSymptoms:
-    - replication lag for one MongoDB secondary (mongodb-rs0-0) grows past 30s and keeps climbing while the primary stays healthy and writes commit normally
-    - the fenced member stays a reachable, voting SECONDARY - there is no election and no availability alert; the problem is isolated to this member falling behind
-    - the tell is on the network path to the member (high latency), not the database engine - its own CPU, disk, WiredTiger tickets and cache are not saturated
-    - reads served by the fenced secondary (the review-service reads secondaryPreferred) return increasingly stale data, and the failover safety margin shrinks
-    - onset and recovery track the injected latency; removing it lets the member replay the backlog and lag returns to ~0
+    - one MongoDB member (mongodb-rs0-0) becomes unreachable from the primary and stops replicating - a replication failure, not merely lag
+    - the replica set keeps a majority (2 of 3) so it stays writable and the primary is healthy; only the fenced member is cut out
+    - the fenced member is at risk of a full initial resync if it stays out longer than the oplog window
+    - the tell is a network partition on the member's replication/heartbeat path, not a slow disk or a busy engine - its own CPU, disk, tickets and cache are fine
+    - onset and recovery track the partition; removing it lets the member re-sync from the oplog and rejoin as a healthy SECONDARY
   actions:
-    # 1. Fence mongodb-rs0-0 from the other replica-set members with a large
-    #    egress latency. Chaos Mesh's netem webhook allows direction=to without an
-    #    explicit target; scoping the target to the other mongod pods keeps the
-    #    delay on the replication path (and off the agent's scrape path, so the
-    #    member still reports metrics and its lag stays visible). The operator sets
-    #    Chaos Mesh's own duration as a dead-man switch.
-    - name: fence-secondary-link
+    # Fully partition mongodb-rs0-0 from the other replica-set members. Scoping the
+    # target to the mongod pods keeps the cut on the member-to-member path and off
+    # the agent's scrape path, so the primary keeps reporting the fenced member's
+    # state and the failure stays observable. Chaos Mesh's own duration is a
+    # dead-man switch.
+    - name: fence-member
       type: ChaosMesh
       chaosMesh:
         kind: NetworkChaos
         spec:
-          action: delay
+          action: partition
           mode: all
           selector:
             namespaces: [default]
             labelSelectors:
               statefulset.kubernetes.io/pod-name: mongodb-rs0-0
-          direction: to
+          direction: both
           target:
             mode: all
             selector:
               namespaces: [default]
               labelSelectors:
                 app.kubernetes.io/replset: rs0
-          delay:
-            latency: "2s"
-            jitter: "400ms"
-            correlation: "50"
-    # 2. Generate oplog on the primary so the fenced member has a stream to fall
-    #    behind on. High-bytes / low-ops (large docs into a capped collection) so
-    #    it churns the oplog without filling disk or spiking the op rate. The
-    #    driver routes writes to whoever is primary now.
-    - name: primary-write-load
-      type: Workload
-      delay: 15s
-      workload:
-        name: mongo-fence-writer
-        image: percona/percona-server-mongodb:7.0.39
-        concurrency: 1
-        env:
-          - name: MONGO_USER
-            value: reviews
-          - name: MONGO_PW
-            valueFrom:
-              secretKeyRef:
-                name: mongodb-custom-user-secret
-                key: reviews
-        command:
-          - mongosh
-          - --nodb
-          - --quiet
-          - --eval
-          - |
-            const u = encodeURIComponent(process.env.MONGO_USER);
-            const p = encodeURIComponent(process.env.MONGO_PW);
-            const uri = `mongodb://${u}:${p}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews`;
-            const db = Mongo(uri).getDB('reviews');
-            try { db.createCollection('fence_churn', { capped: true, size: 128 * 1024 * 1024 }); } catch (e) {}
-            const coll = db.getCollection('fence_churn');
-            const pad = 'x'.repeat(256 * 1024);
-            while (true) {
-              try {
-                const batch = [];
-                for (let i = 0; i < 5; i++) batch.push({ t: new Date(), pad: pad });
-                coll.insertMany(batch);
-              } catch (e) {}
-              sleep(500);
-            }

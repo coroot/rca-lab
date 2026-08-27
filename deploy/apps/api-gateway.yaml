@@ -45,10 +45,10 @@ spec:
               value: "recommendation-service:9000"
           resources:
             requests:
-              cpu: 100m
+              cpu: 500m
               memory: 128Mi
             limits:
-              cpu: "1"
+              cpu: "2"
               memory: 512Mi
           livenessProbe:
             httpGet:

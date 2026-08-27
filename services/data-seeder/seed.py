@@ -301,6 +301,10 @@ def seed_mysql_payments():
     conn.commit()
     mysql_ensure_index(cur, "CREATE INDEX idx_payments_user_id ON payments(user_id)")
     mysql_ensure_index(cur, "CREATE INDEX idx_payments_created_at ON payments(created_at DESC)")
+    # payment-service serves "latest 50 payments of a user"; without a composite
+    # index MySQL reads every row of the user and filesorts, and as users
+    # accumulate thousands of payments this turns into a disk-read storm.
+    mysql_ensure_index(cur, "CREATE INDEX idx_payments_user_created ON payments(user_id, created_at DESC)")
     conn.commit()
 
     cur.execute("SELECT COUNT(*) FROM payments")

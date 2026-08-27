@@ -64,7 +64,7 @@ spec:
         # concurrency chosen so the large random reads keep the 0.5 GB cache thrashing
         # and load the secondaries enough to move review-service (and thus api-gateway)
         # latency, without pinning mongod so hard the health probes flap.
-        concurrency: 16
+        concurrency: 24
         env:
           - name: MONGO_USER
             value: reviews
@@ -92,7 +92,7 @@ spec:
                 // off disk (cache thrash) plus real CPU to fetch and serialize them,
                 // so the secondaries the review-service reads from get loaded
                 const before = new Date(START + Math.floor(Math.random() * SPAN));
-                db.reviews.find({ created_at: { $lt: before } }).sort({ created_at: -1 }).limit(4000).toArray();
+                db.reviews.find({ created_at: { $lt: before } }).sort({ created_at: -1 }).limit(8000).toArray();
               } catch (e) {
                 // brief backoff on a transient error (e.g. an election) before retrying
               }

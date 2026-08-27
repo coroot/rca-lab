@@ -1,30 +1,29 @@
 # Cuts one replica-set SECONDARY off the network so it can no longer reach its
-# peers to pull the oplog. The member stays up and the agent still scrapes it
-# (the partition is scoped to the mongod-to-mongod path, not the agent's scrape),
-# so it self-reports SECONDARY while its applied optime freezes: replication lag
-# climbs, and because its TCP connections to the other members die, Coroot
-# attributes the lag to a network problem ("no network connectivity to a replica
-# set peer") rather than to a slow disk or a lock. This is the network sibling of
-# the fsyncLock scenario (which blocks apply via a lock, with connectivity fine).
-# The other two members keep a majority, so the replica set stays writable and the
-# primary is healthy; only the fenced member falls behind.
+# peers to pull the oplog. The member stays up and the agent still scrapes it (the
+# partition is scoped to the mongod-to-mongod path, not the agent's scrape), so it
+# self-reports SECONDARY while its applied optime freezes: replication lag climbs,
+# and because its TCP connections to the other members die, Coroot attributes the
+# lag to a network problem ("no network connectivity to a replica set peer") rather
+# than to a slow disk or a lock. This is the network sibling of the fsyncLock
+# scenario (which blocks apply via a lock, with connectivity fine). The other two
+# members keep a majority, so the replica set stays writable and the primary is
+# healthy; only the fenced member falls behind.
 #
-# PSMDB exposes no primary/secondary role label, so Chaos Mesh can only target a
-# fixed pod (mongodb-rs0-0). Fencing the primary would instead force an election
-# (a different scenario - mongo-primary-failover covers that), so a first action
-# guarantees mongodb-rs0-0 is a secondary before the fence lands: it steps
-# mongodb-rs0-0 down if it is currently the primary (a quick, controlled election
-# among the other two), and no-ops if it is already a secondary. The step-down
-# holds for 5 minutes, longer than the fence takes to apply, and once fenced the
-# isolated member can never win an election anyway - so it stays a secondary for
-# the whole run.
+# PSMDB exposes no primary/secondary role label, so a single Workload detects a
+# CURRENT secondary (replSetGetStatus) and creates a Chaos Mesh NetworkChaos that
+# targets that specific pod by name. This always fences a secondary and never the
+# primary, with no election: whichever member is primary is simply not chosen.
+# Chaos generation is dynamic (the spec is built around the detected pod) rather
+# than a static selector, because the role is only knowable by querying the replica
+# set - which needs DB credentials the operator does not have. The NetworkChaos
+# carries its own duration as a dead-man switch, and the Workload deletes it on
+# revert (SIGTERM); a SIGKILL is covered by the duration. Credentials (the operator's
+# built-in clusterMonitor user) are read from process.env and never appear on the
+# command line or in the logs.
 #
-# Self-heals: Chaos Mesh's own duration is a dead-man switch, so the fence clears
-# if the operator dies, and reverting removes the partition - the member reconnects,
-# replays the oplog backlog, and its lag returns to ~0 (a full resync only if it was
-# fenced longer than the oplog window). Credentials (the operator's built-in
-# clusterAdmin user, which holds replSetStepDown) are read from process.env and
-# never appear on the command line or in the logs.
+# Self-heals: reverting deletes the NetworkChaos and the member reconnects, replays
+# the oplog backlog, and its lag returns to ~0 (a full resync only if it was fenced
+# longer than the oplog window).
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
@@ -33,39 +32,38 @@ metadata:
 spec:
   displayName: MongoDB secondary fenced off the network (replication lag)
   description: >-
-    Chaos Mesh partitions one MongoDB secondary (mongodb-rs0-0) from the other
-    replica-set members, cutting its oplog-replication and heartbeat paths while
-    the agent keeps scraping it. The member stays SECONDARY but stops replicating:
-    its applied optime freezes, replication lag climbs, and because its TCP
-    connections to the peers die, Coroot attributes the lag to a network problem
-    ("no network connectivity to a replica set peer") rather than to a slow disk,
-    a lock, or a busy engine. The other two members keep a majority, so the replica
-    set stays writable and the primary is healthy; only the fenced member falls
-    behind, so reads with readPreference secondaryPreferred that would have gone to
-    it move to the remaining members. Because PSMDB has no role label and Chaos
-    Mesh can only target a fixed pod, a first action guarantees mongodb-rs0-0 is a
-    secondary before the fence (stepping it down only if it is currently primary),
-    so the fence never turns into a failover. Reverting removes the partition and
-    the member catches back up from the oplog (a full resync only if it was out
-    longer than the oplog window).
+    A Workload detects a current MongoDB secondary and creates a Chaos Mesh
+    NetworkChaos that partitions that member from the other replica-set members,
+    cutting its oplog-replication and heartbeat paths while the agent keeps scraping
+    it. The member stays SECONDARY but stops replicating: its applied optime freezes,
+    replication lag climbs, and because its TCP connections to the peers die, Coroot
+    attributes the lag to a network problem ("no network connectivity to a replica set
+    peer") rather than to a slow disk, a lock, or a busy engine. The other two members
+    keep a majority, so the replica set stays writable and the primary is healthy; only
+    the fenced member falls behind, so reads with readPreference secondaryPreferred that
+    would have gone to it move to the remaining members. The target is chosen by
+    detecting a secondary, so the fence always hits a secondary and never turns into a
+    failover. Reverting deletes the NetworkChaos and the member catches back up from the
+    oplog (a full resync only if it was out longer than the oplog window).
   category: reliability
   severity: high
   duration: 15m
   expectedSymptoms:
-    - replication lag for one MongoDB secondary (mongodb-rs0-0) climbs and stays high while the primary and the other members are healthy
+    - replication lag for one MongoDB secondary climbs and stays high while the primary and the other members are healthy
     - Coroot attributes the lag to the network path - failing/dead connections between the fenced member and its peers - not to a slow disk, a lock, or a saturated engine
     - the fenced member stays SECONDARY (it is still up and scraped); the replica set keeps a majority (2 of 3) and stays writable
     - if the member stays fenced longer than the oplog window it is at risk of a full initial resync
     - onset and recovery track the partition; removing it lets the member reconnect, replay the oplog backlog, and lag returns to ~0
   actions:
-    # 1. Guarantee mongodb-rs0-0 is a secondary before the fence: step it down if it
-    #    is currently primary (holds for 5 min so it stays secondary until well after
-    #    the fence lands), no-op if already a secondary. directConnection so the
-    #    command targets rs0-0 specifically. Runs once and exits.
-    - name: ensure-secondary
+    # Detect a current SECONDARY and create a NetworkChaos partitioning that pod from
+    # the other replica-set members. Talks to the replica set as the clusterMonitor
+    # user and to the Kubernetes API with the pod's own service account token (granted
+    # networkchaos get/create/delete by workload-networkchaos-rbac.yaml). Deletes the
+    # NetworkChaos on revert; the object's own duration is a dead-man switch.
+    - name: fence-secondary
       type: Workload
       workload:
-        name: mongo-fence-ensure-secondary
+        name: mongo-fence-secondary
         image: percona/percona-server-mongodb:7.0.39
         concurrency: 1
         env:
@@ -73,50 +71,61 @@ spec:
             valueFrom:
               secretKeyRef:
                 name: internal-mongodb-users
-                key: MONGODB_CLUSTER_ADMIN_USER
+                key: MONGODB_CLUSTER_MONITOR_USER
           - name: MONGO_PW
             valueFrom:
               secretKeyRef:
                 name: internal-mongodb-users
-                key: MONGODB_CLUSTER_ADMIN_PASSWORD
+                key: MONGODB_CLUSTER_MONITOR_PASSWORD
         command:
-          - mongosh
-          - --nodb
-          - --quiet
-          - --eval
+          - /bin/bash
+          - -c
           - |
-            const u = encodeURIComponent(process.env.MONGO_USER);
-            const p = encodeURIComponent(process.env.MONGO_PW);
-            const uri = `mongodb://${u}:${p}@mongodb-rs0-0.mongodb-rs0.default.svc.cluster.local:27017/admin?authSource=admin&directConnection=true`;
-            try {
-              // steps rs0-0 down for 300s if it is the primary; errors (caught) if
-              // it is already a secondary - either way rs0-0 is a secondary after this
-              Mongo(uri).getDB('admin').adminCommand({ replSetStepDown: 300, secondaryCatchUpPeriodSecs: 5, force: true });
-              print('stepped mongodb-rs0-0 down (it was primary)');
-            } catch (e) {
-              print('mongodb-rs0-0 is already a secondary (step-down not needed)');
+            set -u
+            SA=/var/run/secrets/kubernetes.io/serviceaccount
+            NS=default
+            CHAOS_API="https://kubernetes.default.svc/apis/chaos-mesh.org/v1alpha1/namespaces/$NS/networkchaos"
+            NAME=mongo-fence-network
+
+            api() { # $1=method  $2=path-suffix  $3=body(optional)
+              curl -sS --cacert "$SA/ca.crt" -H "Authorization: Bearer $(cat "$SA/token")" \
+                -H 'Content-Type: application/json' -X "$1" "$CHAOS_API$2" ${3:+--data "$3"}
             }
-    # 2. Partition mongodb-rs0-0 from the other replica-set members. Delayed so the
-    #    step-down above has settled and rs0-0 is a stable secondary. Scoping the
-    #    target to the mongod pods keeps the cut on the member-to-member path and off
-    #    the agent's scrape path, so the lag and the dead peer connections stay
-    #    observable. Chaos Mesh's own duration is a dead-man switch.
-    - name: fence-member
-      type: ChaosMesh
-      delay: 30s
-      chaosMesh:
-        kind: NetworkChaos
-        spec:
-          action: partition
-          mode: all
-          selector:
-            namespaces: [default]
-            labelSelectors:
-              statefulset.kubernetes.io/pod-name: mongodb-rs0-0
-          direction: both
-          target:
-            mode: all
-            selector:
-              namespaces: [default]
-              labelSelectors:
-                app.kubernetes.io/replset: rs0
+            delete_chaos() { api DELETE "/$NAME" >/dev/null 2>&1 || true; }
+            cleanup() { delete_chaos; exit 0; }
+            trap cleanup TERM INT
+
+            # short pod name of a current SECONDARY (from replSetGetStatus), or empty
+            pick_secondary() {
+              mongosh --nodb --quiet --eval '
+                const u = encodeURIComponent(process.env.MONGO_USER);
+                const p = encodeURIComponent(process.env.MONGO_PW);
+                const rs = `mongodb://${u}:${p}@mongodb-rs0:27017/admin?replicaSet=rs0&authSource=admin`;
+                let host = "";
+                try {
+                  const s = Mongo(rs).getDB("admin").adminCommand({ replSetGetStatus: 1 });
+                  const sec = s.members.find(m => m.stateStr === "SECONDARY");
+                  if (sec) host = sec.name;
+                } catch (e) {}
+                print(host);
+              ' 2>/dev/null | grep -oE '^mongodb-rs0-[0-9]+' | head -1
+            }
+
+            TARGET=""
+            while [ -z "$TARGET" ]; do TARGET=$(pick_secondary); [ -z "$TARGET" ] && sleep 3; done
+
+            BODY='{"apiVersion":"chaos-mesh.org/v1alpha1","kind":"NetworkChaos",
+              "metadata":{"name":"'"$NAME"'","namespace":"'"$NS"'"},
+              "spec":{"action":"partition","mode":"all",
+                "selector":{"namespaces":["'"$NS"'"],"pods":{"'"$NS"'":["'"$TARGET"'"]}},
+                "direction":"both",
+                "target":{"mode":"all","selector":{"namespaces":["'"$NS"'"],
+                  "labelSelectors":{"app.kubernetes.io/replset":"rs0"}}},
+                "duration":"20m"}}'
+
+            delete_chaos                    # clear any stale object from a previous run
+            api POST "" "$BODY" >/dev/null
+            echo "fencing secondary $TARGET (created NetworkChaos $NAME)"
+
+            # hold until revert so the SIGTERM trap can delete the NetworkChaos
+            while true; do sleep 30 & wait $!; done

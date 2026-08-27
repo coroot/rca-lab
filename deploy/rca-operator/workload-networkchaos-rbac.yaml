@@ -1,0 +1,37 @@
+# Lets scenario Workloads create and delete Chaos Mesh NetworkChaos objects in the
+# default namespace. Used by scenarios that must target a pod the operator can't
+# resolve declaratively - e.g. the MongoDB fencing scenario detects a current
+# SECONDARY (via replSetGetStatus, which needs DB credentials the operator has no
+# access to) and creates a NetworkChaos targeting that specific pod, deleting it on
+# revert.
+#
+# Workloads run as the namespace default ServiceAccount (the FailureScenario CRD
+# does not expose serviceAccountName), so the grant is bound to it. Scoped to
+# NetworkChaos in the default namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rca-lab-workload-networkchaos
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: rca-lab
+rules:
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["networkchaos"]
+    verbs: [get, list, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rca-lab-workload-networkchaos
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: rca-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rca-lab-workload-networkchaos
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: default

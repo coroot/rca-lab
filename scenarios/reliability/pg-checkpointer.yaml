@@ -12,7 +12,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-checkpointer
+  name: sc-21
   namespace: default
 spec:
   displayName: Frequent checkpoints under a write-heavy batch
@@ -41,10 +41,10 @@ spec:
     # A write-heavy, WAL-generating batch. Non-HOT updates (the name column is
     # GIN-indexed) write both heap and index WAL. Fully reversible — it rewrites
     # rows to their own value and leaves no extra rows; deleting the Job stops it.
-    - name: batch-rewriter
+    - name: a1
       type: Workload
       workload:
-        name: batch-rewriter
+        name: sc-21-w1
         engine: postgres
         concurrency: 2
         interval: 500ms

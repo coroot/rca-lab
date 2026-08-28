@@ -25,7 +25,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mysql-galera-quorum-loss
+  name: sc-20
   namespace: default
 spec:
   displayName: Galera node loses quorum (fenced off the cluster)
@@ -41,7 +41,7 @@ spec:
     Only the fenced node is unavailable. Reverting removes the partition and the node
     rejoins (IST from the gcache, or a full SST if it was out longer than the gcache
     window), showing Joining before it returns to Synced.
-  category: reliability
+  category: database
   icon: mysql
   duration: 10m
   expectedSymptoms:
@@ -56,7 +56,7 @@ spec:
     # effect is pxc-2 isolated from pxc-0 and pxc-1). Scoped to the PXC-to-PXC path,
     # so the agent keeps scraping the fenced node. The operator manages the chaos
     # lifecycle and deletes it on revert.
-    - name: fence-galera-node
+    - name: a1
       type: ChaosMesh
       chaosMesh:
         kind: NetworkChaos

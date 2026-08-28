@@ -8,7 +8,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: dns-slow-resolution
+  name: sc-14
   namespace: default
 spec:
   displayName: Degraded DNS resolution (slow name lookups)
@@ -31,7 +31,7 @@ spec:
     - the common factor is name resolution, not any one hop; the spikes track DNS latency
     - onset and recovery correlate with the DNS latency, not with any deploy or traffic change
   actions:
-    - name: slow-dns
+    - name: a1
       type: ChaosMesh
       chaosMesh:
         kind: NetworkChaos

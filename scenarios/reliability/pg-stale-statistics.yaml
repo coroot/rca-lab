@@ -10,7 +10,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-stale-statistics
+  name: sc-23
   namespace: default
 spec:
   displayName: Stale planner statistics after a large data change
@@ -38,10 +38,10 @@ spec:
     # Freeze stats at a good point, disable autoanalyze, then skew the category
     # distribution with a reversible prefix. Revert strips the prefix, re-enables
     # autovacuum/autoanalyze and re-analyzes. All statements are idempotent.
-    - name: skew-and-freeze-stats
+    - name: a1
       type: DBExec
       dbExec:
-        name: skew-and-freeze-stats
+        name: sc-23-w1
         engine: postgres
         env:
           - name: DATABASE_URL

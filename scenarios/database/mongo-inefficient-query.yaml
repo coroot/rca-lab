@@ -18,7 +18,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mongo-inefficient-query
+  name: sc-01
   namespace: default
 spec:
   displayName: MongoDB unindexed query scanning the whole collection (missing index)
@@ -52,10 +52,10 @@ spec:
     # on the secondaries. Credentials are read from process.env inside the script
     # and never appear on the command line or in the logs. Deleting the Job on
     # revert stops the queries.
-    - name: bad-query
+    - name: a1
       type: Workload
       workload:
-        name: mongo-bad-query
+        name: sc-01-w1
         image: percona/percona-server-mongodb:7.0.39
         # Enough concurrent scans to make the missing-index problem show up as
         # LATENCY, not an outage. The scans evict the review-service's working set

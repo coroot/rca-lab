@@ -1,0 +1,89 @@
+# Reproduces Galera certification conflicts by writing the SAME row on TWO nodes at
+# once. Galera (Percona XtraDB Cluster) is multi-primary but optimistic: a write is
+# applied locally and only certified against the rest of the cluster at commit. If two
+# nodes commit changes to the same row within the replication window, one fails
+# certification - the cluster rolls that transaction back (a "brute-force abort") and
+# the client gets a deadlock error. This is exactly why PXC is fronted by HAProxy in
+# single-writer mode: routing every write to one node avoids conflicts entirely.
+#
+# Two workloads connect straight to two PXC pods (mysql-pxc-0 and mysql-pxc-1 via the
+# headless service, NOT mysql-haproxy) and repeatedly bump the same counter row in a
+# small scratch table. The overlapping writes cannot both certify, so
+# wsrep_local_cert_failures / wsrep_local_bf_aborts climb on the writer nodes and the
+# workloads see "Deadlock found" errors. The cluster stays fully up and Synced - this
+# is a replication-layer problem (wasted write throughput and rolled-back
+# transactions), not resource saturation or an availability failure.
+#
+# Note on blast radius: the application writes through mysql-haproxy (single writer),
+# so the app's own traffic does NOT participate in these conflicts - that is the whole
+# point of single-writer routing. The conflicts here are between the two scenario
+# writers, deliberately reproducing the multi-primary hot-row anti-pattern. Coroot's
+# MySQL Galera replication check fires and names the cause; the RCA module surfaces
+# certification conflicts as a root cause whenever they correlate with an incident.
+#
+# Self-heals: reverting deletes both workloads and the conflict rate returns to zero.
+# The one-row scratch table is left behind (negligible) in the orders database.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: sc-19
+  namespace: default
+spec:
+  displayName: Galera certification conflicts (same row written on two nodes)
+  description: >-
+    Two workloads bypass mysql-haproxy and write the same counter row directly to two
+    different Percona XtraDB Cluster (Galera) nodes at once. Because Galera certifies
+    writes only at commit, the overlapping updates cannot both succeed: one fails
+    certification and the cluster rolls it back (a brute-force abort), so the client
+    gets a deadlock error and wsrep_local_cert_failures / wsrep_local_bf_aborts climb.
+    This is the multi-primary hot-row anti-pattern that HAProxy's single-writer routing
+    normally prevents, so the application (which writes through HAProxy) is not
+    affected; the cluster stays up and Synced. Coroot's MySQL Galera replication check
+    fires and attributes the conflicts to the same rows being written on more than one
+    node. Reverting stops both writers and the conflict rate returns to zero.
+  category: database
+  icon: mysql
+  duration: 10m
+  expectedSymptoms:
+    - certification conflicts climb on the writer nodes - wsrep_local_cert_failures and wsrep_local_bf_aborts - while the cluster stays up and Synced
+    - Coroot's MySQL Galera replication check fires, attributing the conflicts to the same rows being written on more than one node, and names the fix (route all writes through a single node)
+    - the two conflict workloads see "Deadlock found" / "WSREP replication failed" errors on some of their writes
+    - the application is unaffected (it writes through HAProxy to a single node); CPU and IO stay moderate - the damage is rolled-back transactions, not resource saturation
+    - onset and recovery track the workloads; stopping them returns the conflict rate to zero with no lasting damage
+  actions:
+    # Writer A -> mysql-pxc-0. Bumps the same row (id=1) in orders.sc19_scratch.
+    - name: a1
+      type: Workload
+      workload:
+        name: sc-19-w1
+        engine: mysql
+        concurrency: 4
+        interval: 100ms
+        env:
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-custom-user-secret
+                key: orders
+          - name: DATABASE_URL
+            value: orders:$(MYSQL_PASSWORD)@tcp(mysql-pxc-0.mysql-pxc:3306)/orders?parseTime=true&multiStatements=true
+        queries:
+          - "CREATE TABLE IF NOT EXISTS sc19_scratch (id INT PRIMARY KEY, n BIGINT); INSERT INTO sc19_scratch (id, n) VALUES (1, 0) ON DUPLICATE KEY UPDATE n = n + 1;"
+    # Writer B -> mysql-pxc-1. Same row, different node: the two writers conflict.
+    - name: a2
+      type: Workload
+      workload:
+        name: sc-19-w2
+        engine: mysql
+        concurrency: 4
+        interval: 100ms
+        env:
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-custom-user-secret
+                key: orders
+          - name: DATABASE_URL
+            value: orders:$(MYSQL_PASSWORD)@tcp(mysql-pxc-1.mysql-pxc:3306)/orders?parseTime=true&multiStatements=true
+        queries:
+          - "CREATE TABLE IF NOT EXISTS sc19_scratch (id INT PRIMARY KEY, n BIGINT); INSERT INTO sc19_scratch (id, n) VALUES (1, 0) ON DUPLICATE KEY UPDATE n = n + 1;"

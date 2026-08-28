@@ -15,7 +15,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mongo-primary-failover
+  name: sc-02
   namespace: default
 spec:
   displayName: MongoDB primary step-down (replica-set failover)
@@ -48,10 +48,10 @@ spec:
     # clusterAdmin user, which holds replSetStepDown) are read from process.env
     # inside the script and never appear on the command line or in the logs.
     # Deleting the Job on revert stops the step-downs.
-    - name: step-down-primary
+    - name: a1
       type: Workload
       workload:
-        name: mongo-failover
+        name: sc-02-w1
         image: percona/percona-server-mongodb:7.0.39
         concurrency: 1
         env:

@@ -7,7 +7,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: cpu-noisy-neighbor
+  name: sc-12
   namespace: default
 spec:
   displayName: CPU noisy neighbor starving order-service
@@ -28,10 +28,10 @@ spec:
     - the culprit is a separate "video-transcoder" workload co-located on those nodes
     - order-service's dependencies (MySQL, Kafka) stay healthy; the cause is node-local CPU
   actions:
-    - name: video-transcoder
+    - name: a1
       type: Workload
       workload:
-        name: video-transcoder
+        name: sc-12-w1
         image: busybox:1.36
         cpuBurn: 16
         concurrency: 2

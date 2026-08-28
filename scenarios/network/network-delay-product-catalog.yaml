@@ -6,7 +6,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: network-delay-product-catalog
+  name: sc-15
   namespace: default
 spec:
   displayName: Network delay to product-catalog
@@ -23,7 +23,7 @@ spec:
     - api-gateway latency on catalog routes rises by the same ~200ms
     - error rate unchanged; the gap is client-side (network), not server-side
   actions:
-    - name: delay-catalog
+    - name: a1
       type: ChaosMesh
       chaosMesh:
         kind: NetworkChaos

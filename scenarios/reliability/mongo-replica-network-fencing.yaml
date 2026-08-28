@@ -27,7 +27,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mongo-replica-network-fencing
+  name: sc-17
   namespace: default
 spec:
   displayName: MongoDB secondary fenced off the network (replication lag)
@@ -60,10 +60,10 @@ spec:
     # user and to the Kubernetes API with the pod's own service account token (granted
     # networkchaos get/create/delete by workload-networkchaos-rbac.yaml). Deletes the
     # NetworkChaos on revert; the object's own duration is a dead-man switch.
-    - name: fence-secondary
+    - name: a1
       type: Workload
       workload:
-        name: mongo-fence-secondary
+        name: sc-17-w1
         image: percona/percona-server-mongodb:7.0.39
         concurrency: 1
         env:
@@ -85,7 +85,7 @@ spec:
             SA=/var/run/secrets/kubernetes.io/serviceaccount
             NS=default
             CHAOS_API="https://kubernetes.default.svc/apis/chaos-mesh.org/v1alpha1/namespaces/$NS/networkchaos"
-            NAME=mongo-fence-network
+            NAME=sc-17-net
 
             api() { # $1=method  $2=path-suffix  $3=body(optional)
               curl -sS --cacert "$SA/ca.crt" -H "Authorization: Bearer $(cat "$SA/token")" \

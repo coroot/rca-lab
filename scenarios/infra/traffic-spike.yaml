@@ -1,7 +1,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: traffic-spike
+  name: sc-13
   namespace: default
 spec:
   displayName: Traffic spike
@@ -17,7 +17,7 @@ spec:
     - Uniform RPS increase across all services behind the api-gateway
     - Saturation (latency/errors) only at the weakest component, not everywhere
   actions:
-    - name: scale-up-load
+    - name: a1
       type: Scale
       scale:
         targetRef:

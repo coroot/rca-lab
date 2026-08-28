@@ -7,7 +7,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: product-catalog-gc-pressure
+  name: sc-09
   namespace: default
 spec:
   displayName: "Bad deploy: product-catalog GC (allocation) pressure"
@@ -30,7 +30,7 @@ spec:
     - api-gateway latency for catalog-backed endpoints rises at unchanged request rate
     - PostgreSQL and downstreams stay healthy; onset correlates exactly with the rollout
   actions:
-    - name: roll-out-gc-pressure
+    - name: a1
       type: DeployImage
       deployImage:
         targetRef:

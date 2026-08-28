@@ -23,3 +23,4 @@ resources:
   - database/mongo-inefficient-query.yaml
   - reliability/pg-checkpointer.yaml
   - reliability/mysql-galera-quorum-loss.yaml
+  - reliability/mysql-galera-cert-conflicts.yaml

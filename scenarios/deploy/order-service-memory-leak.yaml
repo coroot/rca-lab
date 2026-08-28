@@ -8,7 +8,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: order-service-memory-leak
+  name: sc-08
   namespace: default
 spec:
   displayName: "Bad deploy: order-service slow memory leak (performance)"
@@ -32,7 +32,7 @@ spec:
     - object/instance counts climb into the millions; many small retained objects, no single large allocation
     - MySQL, Kafka and downstreams stay healthy; onset correlates exactly with the rollout; rollback restores latency
   actions:
-    - name: roll-out-slow-leak
+    - name: a1
       type: DeployImage
       deployImage:
         targetRef:

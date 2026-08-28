@@ -1,7 +1,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mysql-analytics-queries
+  name: sc-03
   namespace: default
 spec:
   displayName: Analytics queries on the orders database
@@ -20,10 +20,10 @@ spec:
     - New heavy statements in performance_schema / slow query log attributable
       to the "analytics-reporting" workload
   actions:
-    - name: analytics-reporting
+    - name: a1
       type: Workload
       workload:
-        name: analytics-reporting
+        name: sc-03-w1
         engine: mysql
         concurrency: 4
         interval: 500ms

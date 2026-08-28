@@ -7,7 +7,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-exclusive-lock
+  name: sc-06
   namespace: default
 spec:
   displayName: Stalled migration holding an exclusive lock on products
@@ -30,10 +30,10 @@ spec:
     - pg_stat_activity shows sessions in a Lock wait blocked by a "schema-migration" session that holds ACCESS EXCLUSIVE on products while stalled (doing nothing — a PgSleep wait); pg_blocking_pids identifies the culprit
     - onset and full recovery correlate exactly with the start and termination of the stalled lock-holder session
   actions:
-    - name: schema-migration
+    - name: a1
       type: Workload
       workload:
-        name: schema-migration
+        name: sc-06-w1
         engine: postgres
         concurrency: 1
         interval: 10s

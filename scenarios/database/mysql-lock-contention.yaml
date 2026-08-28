@@ -8,7 +8,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mysql-lock-contention
+  name: sc-04
   namespace: default
 spec:
   displayName: Stalled transaction holding row locks on orders
@@ -32,10 +32,10 @@ spec:
     - the blocking session is a stalled transaction holding FOR UPDATE locks on the orders table (a "User sleep" in SHOW PROCESSLIST), not a heavy query
     - onset and full recovery correlate exactly with the start and termination of the stalled lock-holder session
   actions:
-    - name: stalled-txn
+    - name: a1
       type: Workload
       workload:
-        name: stalled-txn
+        name: sc-04-w1
         engine: mysql
         concurrency: 1
         interval: 10s

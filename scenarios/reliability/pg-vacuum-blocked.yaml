@@ -9,7 +9,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-vacuum-blocked
+  name: sc-25
   namespace: default
 spec:
   displayName: Vacuum held back by a long-running transaction
@@ -39,10 +39,10 @@ spec:
     #    pg_sleep outlives the run; a sleeping backend does no socket IO, so it
     #    will NOT notice its client pod dying — deleting the Job is not enough to
     #    release the snapshot, which is why action 3 explicitly kills it.
-    - name: reporting-snapshot
+    - name: a1
       type: Workload
       workload:
-        name: reporting-snapshot
+        name: sc-25-w1
         engine: postgres
         concurrency: 1
         interval: 10s
@@ -53,14 +53,14 @@ spec:
                 name: pg-pguser-products
                 key: uri
         queries:
-          - "SET application_name = 'rca-lab-vacuum-holder'; BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(1800);"
+          - "SET application_name = 'sc-25-holder'; BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(1800);"
     # 2. Churn a hot window so dead tuples are generated for autovacuum to (fail
     #    to fully) reclaim while the horizon is pinned. Autovacuum stays enabled.
-    - name: row-rewriter
+    - name: a2
       type: Workload
       delay: 15s
       workload:
-        name: row-rewriter
+        name: sc-25-w2
         engine: postgres
         concurrency: 1
         interval: 2s
@@ -77,10 +77,10 @@ spec:
     #    terminates the stalled holder session by application_name — reverts LIFO,
     #    so this runs first and releases the xmin horizon at once. Idempotent: it
     #    matches zero rows if the holder is already gone.
-    - name: release-holder
+    - name: a3
       type: DBExec
       dbExec:
-        name: release-holder
+        name: sc-25-w3
         engine: postgres
         env:
           - name: DATABASE_URL
@@ -91,4 +91,4 @@ spec:
         ensure:
           - "SELECT 1"
         revert:
-          - "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'rca-lab-vacuum-holder' AND pid <> pg_backend_pid()"
+          - "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'sc-25-holder' AND pid <> pg_backend_pid()"

@@ -11,7 +11,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-replication-lag
+  name: sc-22
   namespace: default
 spec:
   displayName: Postgres replica falling behind (degraded network)
@@ -39,7 +39,7 @@ spec:
     # 1. Degrade the current standby's network (selected by role=replica so it
     #    follows failovers). Chaos Mesh's own duration is set by the operator as a
     #    dead-man switch, so the fault self-heals if the operator dies.
-    - name: replica-network-latency
+    - name: a1
       type: ChaosMesh
       chaosMesh:
         kind: NetworkChaos
@@ -63,11 +63,11 @@ spec:
             correlation: "50"
     # 2. Generate WAL on the primary so the throttled standby has volume to fall
     #    behind on. Autovacuum stays on; the churn is a no-op rewrite (reversible).
-    - name: wal-writer
+    - name: a2
       type: Workload
       delay: 20s
       workload:
-        name: wal-writer
+        name: sc-22-w1
         engine: postgres
         concurrency: 1
         interval: 1s

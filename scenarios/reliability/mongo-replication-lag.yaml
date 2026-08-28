@@ -35,7 +35,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mongo-replication-lag
+  name: sc-18
   namespace: default
 spec:
   displayName: MongoDB secondary falling behind (frozen oplog apply)
@@ -68,10 +68,10 @@ spec:
     # operator's built-in clusterAdmin user (its clusterAdmin role includes
     # hostManager, which grants the fsync/unlock privileges), read from
     # process.env inside mongosh.
-    - name: freeze-secondary-apply
+    - name: a1
       type: Workload
       workload:
-        name: mongo-replication-lag
+        name: sc-18-w1
         image: percona/percona-server-mongodb:7.0.39
         concurrency: 1
         env:

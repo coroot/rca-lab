@@ -26,7 +26,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: mongo-long-transaction
+  name: sc-16
   namespace: default
 spec:
   displayName: MongoDB long-running open transaction (lock holder)
@@ -57,10 +57,10 @@ spec:
     # their locks and pin a snapshot, then hold the transaction open. Loop with a
     # bounded hold + abort so a leaked transaction never lingers indefinitely, and
     # so Job deletion (revert) aborts promptly.
-    - name: hold-open-transaction
+    - name: a1
       type: Workload
       workload:
-        name: mongo-long-txn
+        name: sc-16-w1
         image: percona/percona-server-mongodb:7.0.39
         concurrency: 1
         env:
@@ -79,8 +79,8 @@ spec:
           - |
             const u = encodeURIComponent(process.env.MONGO_USER);
             const p = encodeURIComponent(process.env.MONGO_PW);
-            // appName=long-txn so Coroot can attribute the open transaction to this client
-            const uri = `mongodb://${u}:${p}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&appName=long-txn`;
+            // appName=sc-16-w1 so Coroot can attribute the open transaction to this client
+            const uri = `mongodb://${u}:${p}@mongodb-rs0:27017/reviews?replicaSet=rs0&authSource=reviews&appName=sc-16-w1`;
             const conn = Mongo(uri);
             const coll = conn.getDB('reviews').getCollection('long_txn_lock');
             // seed a few documents to lock inside the transaction

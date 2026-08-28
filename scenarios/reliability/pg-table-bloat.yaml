@@ -9,7 +9,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: pg-table-bloat
+  name: sc-24
   namespace: default
 spec:
   displayName: Table bloat from disabled autovacuum + churn
@@ -33,10 +33,10 @@ spec:
     - re-enabling autovacuum (revert) lets the reclaim happen; dead tuples fall back and growth stops
   actions:
     # 1. Disable autovacuum on the table. Revert re-enables it and analyzes.
-    - name: disable-autovacuum
+    - name: a1
       type: DBExec
       dbExec:
-        name: disable-autovacuum
+        name: sc-24-w1
         engine: postgres
         env:
           - name: DATABASE_URL
@@ -54,11 +54,11 @@ spec:
     # 2. Churn a hot window of rows so dead tuples accumulate. Updating the
     #    GIN-indexed name column forces non-HOT updates (heap + index bloat).
     #    Deleting the Job stops the churn; revert of action 1 reclaims the space.
-    - name: row-rewriter
+    - name: a2
       type: Workload
       delay: 15s
       workload:
-        name: row-rewriter
+        name: sc-24-w2
         engine: postgres
         concurrency: 1
         interval: 2s

@@ -6,7 +6,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: review-service-event-loop
+  name: sc-11
   namespace: default
 spec:
   displayName: "Bad deploy: review-service event-loop saturation"
@@ -29,7 +29,7 @@ spec:
     - MongoDB stays healthy — query latency and server load flat; the bottleneck is in-process CPU
     - onset correlates exactly with the review-service rollout; rollback restores latency
   actions:
-    - name: roll-out-event-loop-block
+    - name: a1
       type: DeployImage
       deployImage:
         targetRef:

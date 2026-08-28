@@ -6,7 +6,7 @@
 apiVersion: rcalab.dev/v1alpha1
 kind: FailureScenario
 metadata:
-  name: recommendation-memory-leak
+  name: sc-10
   namespace: default
 spec:
   displayName: "Bad deploy: recommendation-service memory leak"
@@ -26,7 +26,7 @@ spec:
     - restart sawtooth; product-catalog/api-gateway see recommendation gRPC errors during restarts
     - onset correlates exactly with the recommendation-service rollout
   actions:
-    - name: roll-out-leak
+    - name: a1
       type: DeployImage
       deployImage:
         targetRef:

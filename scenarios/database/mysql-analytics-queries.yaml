@@ -12,7 +12,7 @@ spec:
     full-table scans and large joins over the ~10GB orders/order_items tables,
     saturating the PXC nodes.
   category: database
-  severity: high
+  icon: mysql
   duration: 20m
   expectedSymptoms:
     - Elevated latency and errors in order-service and cart/checkout flows

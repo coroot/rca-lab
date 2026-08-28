@@ -14,7 +14,7 @@ func TestSummarizeDefaultsPhaseAndSymptoms(t *testing.T) {
 		Spec: v1alpha1.FailureScenarioSpec{
 			DisplayName: "Slow DB",
 			Category:    "database",
-			Severity:    "high",
+			Icon:        "mysql",
 			Enabled:     true,
 		},
 	}

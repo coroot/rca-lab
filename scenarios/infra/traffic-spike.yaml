@@ -11,7 +11,7 @@ spec:
     component saturates first; everything else just gets proportionally
     busier. Reverting scales the load generator back to its previous size.
   category: infra
-  severity: medium
+  icon: traffic
   duration: 15m
   expectedSymptoms:
     - Uniform RPS increase across all services behind the api-gateway

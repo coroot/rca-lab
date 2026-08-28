@@ -16,7 +16,7 @@ spec:
     product-catalog's own server-side processing time and CPU stay flat — the
     delay is on the network path, not in the service or its database.
   category: network
-  severity: medium
+  icon: network
   duration: 10m
   expectedSymptoms:
     - product-catalog p99 latency rises ~200ms with flat CPU and DB time

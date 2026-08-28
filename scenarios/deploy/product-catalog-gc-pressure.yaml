@@ -21,7 +21,7 @@ spec:
     propagates up to the api-gateway. Reverting rolls the Deployment back to the
     known-good image.
   category: deploy
-  severity: high
+  icon: go
   duration: 30m
   expectedSymptoms:
     - product-catalog GC CPU fraction and GC frequency rise sharply after the rollout

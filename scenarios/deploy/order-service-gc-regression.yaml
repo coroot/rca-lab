@@ -17,7 +17,7 @@ spec:
     and more time in GC, and p99 latency degrades while RPS stays flat.
     Reverting rolls the Deployment back to the known-good image.
   category: deploy
-  severity: high
+  icon: java
   duration: 30m
   expectedSymptoms:
     - order-service p99 latency rises shortly after the rollout; p50 mostly flat

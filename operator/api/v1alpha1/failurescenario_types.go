@@ -231,8 +231,10 @@ type FailureScenarioSpec struct {
 	Description string `json:"description,omitempty"`
 	// +kubebuilder:validation:Enum=database;deploy;infra;app;network;kafka;reliability
 	Category string `json:"category"`
-	// +kubebuilder:validation:Enum=low;medium;high
-	Severity string `json:"severity"`
+	// Icon is a short technology key the UI uses to show a logo next to the
+	// scenario (e.g. postgres, mongodb, mysql, java, go, nodejs, python, rust).
+	// +optional
+	Icon string `json:"icon,omitempty"`
 	// ExpectedSymptoms documents the telemetry an RCA tool should observe
 	// (used for grading, not by the operator).
 	// +optional
@@ -320,7 +322,6 @@ type FailureScenarioStatus struct {
 // +kubebuilder:resource:shortName=fs
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Category",type=string,JSONPath=`.spec.category`
-// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.spec.severity`
 // +kubebuilder:printcolumn:name="Enabled",type=boolean,JSONPath=`.spec.enabled`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

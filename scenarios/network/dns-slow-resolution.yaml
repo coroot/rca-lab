@@ -22,7 +22,7 @@ spec:
     wrong with any single service; the shared cause is slow name resolution.
     Reverting removes the delay and resolution latency returns to normal at once.
   category: network
-  severity: high
+  icon: dns
   duration: 10m
   expectedSymptoms:
     - DNS query latency for the app services rises sharply (~500ms per lookup) while CoreDNS's own CPU stays flat — the delay is on the network path to it, not in CoreDNS

@@ -18,7 +18,7 @@ spec:
     api-gateway see recommendation errors/timeouts. Reverting rolls the
     Deployment back to the known-good image.
   category: deploy
-  severity: high
+  icon: go
   duration: 30m
   expectedSymptoms:
     - recommendation-service RSS climbs steadily under load (Go heap growth)

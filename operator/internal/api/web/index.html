@@ -46,12 +46,11 @@
   tr.row-main:hover { background: #f9fafb; }
   tr:last-child td { border-bottom: none; }
   .name { font-weight: 600; }
-  .name .id { color: var(--muted); font-weight: 400; font-size: 12px; display: block; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: capitalize; }
-  .cat { background: #eef2ff; color: #4338ca; }
-  .sev-low { background: #ecfdf5; color: #047857; }
-  .sev-medium { background: #fffbeb; color: #b45309; }
-  .sev-high { background: #fef2f2; color: #b91c1c; }
+  .name-cell { display: flex; align-items: flex-start; gap: 9px; }
+  .name-text { min-width: 0; }
+  .name-text .id { color: var(--muted); font-weight: 400; font-size: 12px; display: block; }
+  .tech-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; object-fit: contain; }
+  .tech-icon.glyph { text-align: center; font-size: 15px; line-height: 18px; }
   tr.group td {
     background: #eef1f5; color: #374151; font-weight: 700; font-size: 11px;
     text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px;
@@ -132,14 +131,13 @@
   <table id="tbl">
     <thead>
       <tr>
-        <th style="width:44%">Name</th>
-        <th>Severity</th>
-        <th>State</th>
-        <th style="text-align:right">Action</th>
+        <th>Name</th>
+        <th style="width:110px">State</th>
+        <th style="width:130px;text-align:right">Action</th>
       </tr>
     </thead>
     <tbody id="rows">
-      <tr><td colspan="4" class="loading">Loading…</td></tr>
+      <tr><td colspan="3" class="loading">Loading…</td></tr>
     </tbody>
   </table>
 </main>
@@ -156,6 +154,21 @@ let filterText = "";      // current search box query, lowercased
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Per-technology icons shown next to the scenario name for quick navigation.
+// Tech keys map to real logo SVGs under tech-icons/; a few infra keys use a glyph.
+const TECH_ICONS = {
+  postgres: "postgres", mongodb: "mongodb", mysql: "mysql", redis: "redis",
+  kafka: "kafka", java: "java", go: "golang", nodejs: "nodejs",
+  python: "python", rust: "rust",
+};
+const GLYPH_ICONS = { cpu: "⚙️", network: "🌐", dns: "🧭", traffic: "🚦" };
+function iconHtml(key) {
+  const f = TECH_ICONS[key];
+  if (f) return `<img class="tech-icon" src="tech-icons/${f}.svg" alt="${esc(key)}" title="${esc(key)}">`;
+  const g = GLYPH_ICONS[key];
+  return g ? `<span class="tech-icon glyph" title="${esc(key)}">${g}</span>` : "";
 }
 
 function toast(msg, ok) {
@@ -223,16 +236,13 @@ const CAT_LABEL = {
 function catRank(c) { const i = CAT_ORDER.indexOf(c); return i < 0 ? CAT_ORDER.length : i; }
 
 function rowHtml(s) {
-  const sev = s.severity || "—";
-  const sevClass = ["low", "medium", "high"].includes(sev) ? `sev-${sev}` : "cat";
   let html = `<tr class="row-main" onclick="toggle('${esc(s.name)}')">
-    <td class="name">${esc(s.displayName || s.name)}<span class="id">${esc(s.name)}</span></td>
-    <td><span class="badge ${sevClass}">${esc(sev)}</span></td>
+    <td class="name"><div class="name-cell">${iconHtml(s.icon)}<div class="name-text">${esc(s.displayName || s.name)}<span class="id">${esc(s.name)}</span></div></div></td>
     <td>${stateCell(s.phase)}</td>
     <td class="actions" onclick="event.stopPropagation()">${actionCell(s)}</td>
   </tr>`;
   if (expanded === s.name) {
-    html += `<tr class="detail"><td colspan="4"><div class="detail-inner" id="detail-${esc(s.name)}">${renderDetail(s.name)}</div></td></tr>`;
+    html += `<tr class="detail"><td colspan="3"><div class="detail-inner" id="detail-${esc(s.name)}">${renderDetail(s.name)}</div></td></tr>`;
   }
   return html;
 }
@@ -242,7 +252,7 @@ function render(list) {
   updateCount(list.length, allScenarios.length);
   if (!list.length) {
     const msg = filterText ? `No scenarios match “${esc(filterText)}”.` : "No scenarios found.";
-    tb.innerHTML = `<tr><td colspan="4" class="empty" style="text-align:center;padding:30px">${msg}</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="3" class="empty" style="text-align:center;padding:30px">${msg}</td></tr>`;
     return;
   }
   // Group by category, preserving each group's incoming order.
@@ -256,7 +266,7 @@ function render(list) {
   let html = "";
   for (const c of cats) {
     const rows = groups.get(c);
-    html += `<tr class="group"><td colspan="4">${esc(CAT_LABEL[c] || c)}<span class="gcount">${rows.length}</span></td></tr>`;
+    html += `<tr class="group"><td colspan="3">${esc(CAT_LABEL[c] || c)}<span class="gcount">${rows.length}</span></td></tr>`;
     for (const s of rows) html += rowHtml(s);
   }
   tb.innerHTML = html;

@@ -23,7 +23,7 @@ spec:
     the locks. Reverting terminates the session, which rolls the transaction
     back and releases the locks at once.
   category: database
-  severity: high
+  icon: mysql
   duration: 10m
   expectedSymptoms:
     - order-service checkout/fulfillment writes to orders block and then error with "Lock wait timeout exceeded" (50s); order reads still succeed

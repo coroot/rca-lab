@@ -29,7 +29,7 @@ spec:
     and WAL generation is far above baseline. Reverting removes the batch load and
     the checkpoint cadence falls back to the timer.
   category: reliability
-  severity: medium
+  icon: postgres
   duration: 20m
   expectedSymptoms:
     - checkpoints shift from timed to requested (checkpoints_req rises relative to checkpoints_timed) — they fire on WAL volume, not the 5-minute timer

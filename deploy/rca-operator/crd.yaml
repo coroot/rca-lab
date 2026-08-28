@@ -23,9 +23,6 @@ spec:
     - jsonPath: .spec.category
       name: Category
       type: string
-    - jsonPath: .spec.severity
-      name: Severity
-      type: string
     - jsonPath: .spec.enabled
       name: Enabled
       type: boolean
@@ -659,11 +656,10 @@ spec:
                 items:
                   type: string
                 type: array
-              severity:
-                enum:
-                - low
-                - medium
-                - high
+              icon:
+                description: |-
+                  Icon is a short technology key the UI uses to show a logo next to the
+                  scenario (e.g. postgres, mongodb, mysql, java, go, nodejs, python, rust).
                 type: string
               trigger:
                 description: Trigger starts a one-shot manual run.
@@ -684,7 +680,6 @@ spec:
             - actions
             - category
             - displayName
-            - severity
             type: object
           status:
             description: FailureScenarioStatus defines the observed state of a FailureScenario.

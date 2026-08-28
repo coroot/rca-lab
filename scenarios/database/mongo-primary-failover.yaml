@@ -33,7 +33,7 @@ spec:
     and repeated no-primary gaps. Reverting stops the workload; the current primary
     stays put.
   category: database
-  severity: high
+  icon: mongodb
   duration: 5m
   expectedSymptoms:
     - MongoDB primary elections occur repeatedly - the primary changes and there is a brief window with no primary in the replica set each time

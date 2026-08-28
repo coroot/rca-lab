@@ -1,0 +1,77 @@
+# Partitions one Percona XtraDB Cluster (Galera) node off the network from the
+# other two, so it loses quorum. Galera is quorum-based: a node only stays in the
+# Primary Component if it can reach a majority of the cluster. Cutting mysql-pxc-2
+# off from mysql-pxc-0 and mysql-pxc-1 leaves it alone in a 1-of-3 minority, so it
+# leaves the Primary Component. On PXC a node that loses quorum stops accepting
+# client connections entirely (mysqld refuses TCP on 3306), so Coroot can no longer
+# scrape it and reports it as down (mysql_up = 0). The two surviving nodes keep a
+# 2-of-3 majority, stay Primary and writable through mysql-haproxy (which routes
+# only to synced nodes), and their wsrep_cluster_size drops from 3 to 2 - the
+# Galera-specific tell that a member has dropped out of the Primary Component.
+#
+# This is the Galera sibling of the mongo replica-network-fencing scenario, but the
+# failure mode is different: MongoDB fences a secondary and it lags; Galera fences a
+# node and it loses quorum (an availability failure on that node), because Galera is
+# synchronous and quorum-based rather than asynchronous.
+#
+# The partition targets a fixed node by pod-index (2). Galera is multi-primary with
+# no primary role to detect, and isolating any single node is safe: the surviving
+# two always retain the majority, so this never takes the cluster down. HAProxy drops
+# the fenced node from its backend, so writes and reads continue on the other two.
+#
+# Self-heals: reverting deletes the NetworkChaos and the node rejoins the Primary
+# Component - via IST from the gcache, or a full SST if it was out longer than the
+# gcache window, during which its state shows Joining before it returns to Synced.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: mysql-galera-quorum-loss
+  namespace: default
+spec:
+  displayName: Galera node loses quorum (fenced off the cluster)
+  description: >-
+    Chaos Mesh partitions one Percona XtraDB Cluster (Galera) node from the other
+    two. Because Galera is synchronous and quorum-based, the isolated node can no
+    longer reach a majority, so it leaves the Primary Component. On PXC a node that
+    loses quorum stops accepting client connections, so Coroot can no longer scrape
+    it and reports it as down (mysql_up = 0). The other two nodes keep a 2-of-3
+    majority, stay Primary and writable, and their wsrep_cluster_size drops from 3 to
+    2 - the Galera tell that a member left the Primary Component. HAProxy routes
+    around the fenced node, so the application keeps working on the surviving pair.
+    Only the fenced node is unavailable. Reverting removes the partition and the node
+    rejoins (IST from the gcache, or a full SST if it was out longer than the gcache
+    window), showing Joining before it returns to Synced.
+  category: reliability
+  icon: mysql
+  duration: 10m
+  expectedSymptoms:
+    - the fenced PXC node stops accepting connections and Coroot reports it as down (mysql_up = 0); the MySQL availability check fires for that node
+    - the other two nodes keep a majority (2 of 3), stay Primary and writable; HAProxy drops the fenced node from its backend so the app keeps working
+    - wsrep_cluster_size on the surviving nodes drops from 3 to 2 for the duration of the partition (the Galera membership tell, on the cluster-size chart)
+    - onset and recovery track the partition; on rejoin the node's Galera state shows Joining (state transfer) before returning to Synced
+    - throughout, the surviving nodes stay Synced and the cluster remains writable - only the fenced node is affected
+  actions:
+    # Partition mysql-pxc-2 from the other PXC nodes. selector = the fenced node
+    # (by pod-index); target = all pxc pods (the self-link is a no-op, so the net
+    # effect is pxc-2 isolated from pxc-0 and pxc-1). Scoped to the PXC-to-PXC path,
+    # so the agent keeps scraping the fenced node. The operator manages the chaos
+    # lifecycle and deletes it on revert.
+    - name: fence-galera-node
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: partition
+          mode: all
+          direction: both
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              apps.kubernetes.io/pod-index: "2"
+              app.kubernetes.io/component: pxc
+          target:
+            mode: all
+            selector:
+              namespaces: [default]
+              labelSelectors:
+                app.kubernetes.io/component: pxc

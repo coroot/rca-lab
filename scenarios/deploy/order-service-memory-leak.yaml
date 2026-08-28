@@ -23,7 +23,7 @@ spec:
     before the heap is exhausted. Reverting rolls the Deployment back to the
     known-good image.
   category: deploy
-  severity: high
+  icon: java
   duration: 30m
   expectedSymptoms:
     - order-service p95/p99 latency creeps up gradually after the rollout (not a step change, not a crash)

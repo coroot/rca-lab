@@ -44,7 +44,7 @@ spec:
     on a non-sharded replica set). Reverting aborts the transaction and releases
     the locks.
   category: reliability
-  severity: medium
+  icon: mongodb
   duration: 15m
   expectedSymptoms:
     - an open transaction is attributed to the client application "long-txn" and persists for minutes at a time (mongo_open_transactions by client)

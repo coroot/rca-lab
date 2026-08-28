@@ -15,7 +15,7 @@ services:
   fulfillment-service: 1.0.2   # idx_shipments_created_at for cheap retention cutoffs
   load-generator: 1.1.0         # per-service RPS override (RPS_OVERRIDES)
   data-seeder: 1.0.6          # created_at indexes on orders + shipments for retention cutoffs
-  operator: 1.4.0             # UI: group scenarios by category + severity column
+  operator: 1.5.0             # UI: per-scenario tech icons; removed the severity column
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).
 charts:

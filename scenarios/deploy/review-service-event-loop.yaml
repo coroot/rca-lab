@@ -20,7 +20,7 @@ spec:
     100%, and latency balloons — even though MongoDB is healthy and every query
     is fast. Reverting rolls the Deployment back to the known-good image.
   category: deploy
-  severity: high
+  icon: nodejs
   duration: 30m
   expectedSymptoms:
     - review-service p95/p99 latency rises sharply after the rollout at unchanged request rate

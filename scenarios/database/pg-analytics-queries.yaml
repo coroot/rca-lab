@@ -12,7 +12,7 @@ spec:
     The queries do full-table scans of the ~10GB products table and starve the
     OLTP traffic of CPU, IO and pool connections.
   category: database
-  severity: high
+  icon: postgres
   duration: 20m
   expectedSymptoms:
     - Elevated latency in product-catalog and inventory-service (shared PostgreSQL cluster)

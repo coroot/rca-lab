@@ -46,7 +46,7 @@ spec:
     failover. Reverting deletes the NetworkChaos and the member catches back up from the
     oplog (a full resync only if it was out longer than the oplog window).
   category: reliability
-  severity: high
+  icon: mongodb
   duration: 15m
   expectedSymptoms:
     - replication lag for one MongoDB secondary climbs and stays high while the primary and the other members are healthy

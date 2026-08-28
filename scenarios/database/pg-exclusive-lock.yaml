@@ -21,7 +21,7 @@ spec:
     only signal is lock waits (pg_locks / pg_stat_activity). Reverting terminates
     the stalled session, which releases the lock; everything recovers at once.
   category: database
-  severity: high
+  icon: postgres
   duration: 10m
   expectedSymptoms:
     - product-catalog queries on the products table block on lock acquisition; latency spikes and requests time out at unchanged request rate

@@ -23,7 +23,7 @@ spec:
     eventually threatens the table. Reverting re-enables autovacuum (which then
     reclaims the dead tuples) and re-analyzes the table.
   category: reliability
-  severity: medium
+  icon: postgres
   duration: 30m
   expectedSymptoms:
     - dead tuples on public.products (n_dead_tup) grow steadily with no matching autovacuum; the dead/live ratio climbs

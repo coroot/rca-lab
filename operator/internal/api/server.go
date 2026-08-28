@@ -33,7 +33,7 @@ const scenarioNamespace = "default"
 // defaultRunDuration is used when POST /run omits durationSeconds.
 const defaultRunDuration = 900 * time.Second
 
-//go:embed web/index.html
+//go:embed web
 var webFS embed.FS
 
 // Server is a manager.Runnable that serves the REST API and web UI.
@@ -118,7 +118,7 @@ type scenarioSummary struct {
 	DisplayName        string               `json:"displayName"`
 	Description        string               `json:"description"`
 	Category           string               `json:"category"`
-	Severity           string               `json:"severity"`
+	Icon               string               `json:"icon"`
 	ExpectedSymptoms   []string             `json:"expectedSymptoms"`
 	Enabled            bool                 `json:"enabled"`
 	Phase              string               `json:"phase"`
@@ -150,7 +150,7 @@ func summarize(fs *v1alpha1.FailureScenario) scenarioSummary {
 		DisplayName:        fs.Spec.DisplayName,
 		Description:        fs.Spec.Description,
 		Category:           fs.Spec.Category,
-		Severity:           fs.Spec.Severity,
+		Icon:               fs.Spec.Icon,
 		ExpectedSymptoms:   symptoms,
 		Enabled:            fs.Spec.Enabled,
 		Phase:              phase,

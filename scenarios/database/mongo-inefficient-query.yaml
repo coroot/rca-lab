@@ -38,7 +38,7 @@ spec:
     Reverting stops the query workload and latency recovers; the durable fix would
     be to add an index covering the filter.
   category: database
-  severity: high
+  icon: mongodb
   duration: 15m
   expectedSymptoms:
     - a MongoDB query shape shows a huge query-targeting ratio — millions of documents examined per document returned — with a COLLSCAN plan

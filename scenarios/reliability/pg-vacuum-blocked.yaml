@@ -24,7 +24,7 @@ spec:
     the transaction-id horizon is frozen. Reverting terminates the stalled
     session; the horizon advances and the next autovacuum reclaims the backlog.
   category: reliability
-  severity: high
+  icon: postgres
   duration: 30m
   expectedSymptoms:
     - a very old transaction is open (pg_stat_activity shows a large xact_start age and a held backend_xmin) — a REPEATABLE READ session that took a snapshot and never committed

@@ -20,7 +20,7 @@ spec:
     latency for its (I/O-bound) endpoints stays low, so the tell is the CPU
     starvation, not the latency.
   category: infra
-  severity: medium
+  icon: cpu
   duration: 10m
   expectedSymptoms:
     - node CPU saturates (~100%) on the nodes running order-service

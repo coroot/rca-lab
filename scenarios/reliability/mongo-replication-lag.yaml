@@ -54,7 +54,7 @@ spec:
     secondary now, never the primary, so it can never stall cluster-wide writes,
     and it unlocks the member it locked when the scenario is reverted.
   category: reliability
-  severity: high
+  icon: mongodb
   duration: 15m
   expectedSymptoms:
     - replication lag for one MongoDB secondary rises past 30s and stays there (climbing) for the whole run while the primary stays healthy and writes commit normally

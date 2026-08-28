@@ -26,7 +26,7 @@ spec:
     category values, re-enables autoanalyze and re-analyzes, so estimates match
     again.
   category: reliability
-  severity: medium
+  icon: postgres
   duration: 30m
   expectedSymptoms:
     - autoanalyze is off on public.products (last_analyze / last_autoanalyze stay old) while n_mod_since_analyze grows large

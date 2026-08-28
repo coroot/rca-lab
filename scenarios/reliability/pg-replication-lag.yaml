@@ -27,7 +27,7 @@ spec:
     stops the extra write load, and the standby replays the backlog and catches
     up.
   category: reliability
-  severity: high
+  icon: postgres
   duration: 20m
   expectedSymptoms:
     - Postgres replication lag for the standby grows over the run (bytes behind primary and replay lag in seconds) while the primary stays healthy

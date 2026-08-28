@@ -41,7 +41,7 @@ spec:
     Only the fenced node is unavailable. Reverting removes the partition and the node
     rejoins (IST from the gcache, or a full SST if it was out longer than the gcache
     window), showing Joining before it returns to Synced.
-  category: database
+  category: reliability
   icon: mysql
   duration: 10m
   expectedSymptoms:

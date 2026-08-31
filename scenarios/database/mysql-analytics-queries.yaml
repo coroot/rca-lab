@@ -9,14 +9,17 @@ spec:
     An "analytics-reporting" batch workload starts running heavy join and
     aggregation queries directly against the production MySQL orders database
     (through mysql-haproxy, same path as order-service). The queries do
-    full-table scans and large joins over the ~10GB orders/order_items tables,
-    saturating the PXC nodes.
+    full-table scans and large joins over the orders/order_items tables. Those
+    tables are held at a stable 7-day retention floor and fit in the InnoDB
+    buffer pool, so the scans are CPU-bound: they saturate the PXC primary's
+    CPU and, because the apps share that node, drive up order-service and
+    checkout latency.
   category: database
   icon: mysql
-  duration: 20m
+  duration: 45m
   expectedSymptoms:
     - Elevated latency and errors in order-service and cart/checkout flows
-    - MySQL (PXC) CPU and IO saturation; growing filesort/temp-table activity
+    - MySQL (PXC) CPU saturation; growing filesort/temp-table activity
     - New heavy statements in performance_schema / slow query log attributable
       to the "analytics-reporting" workload
   actions:
@@ -25,7 +28,7 @@ spec:
       workload:
         name: sc-03-w1
         engine: mysql
-        concurrency: 4
+        concurrency: 6
         interval: 500ms
         env:
           # MYSQL_PASSWORD must be declared before DATABASE_URL so the

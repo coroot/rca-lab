@@ -31,6 +31,9 @@ const (
 	consumerGroup = "fulfillment"
 	maxAttempts   = 3
 	retryBackoff  = 500 * time.Millisecond
+
+	// MySQL ER_DUP_KEYNAME: the index already exists.
+	erDupKeyName = 1061
 )
 
 var (
@@ -359,10 +362,15 @@ func initDB(ctx context.Context) {
 	}
 	// created_at index so the mysql-retention CronJob's cutoff query is a small
 	// range scan instead of a full table scan of this ever-growing table.
+	// MySQL has no CREATE INDEX IF NOT EXISTS, so tolerate the duplicate-key-name
+	// error instead: that keeps restarts and concurrent replicas idempotent.
 	if _, err := db.ExecContext(ctx,
-		`CREATE INDEX IF NOT EXISTS idx_shipments_created_at ON shipments(created_at)`); err != nil {
-		slog.Error("Failed to create index", "error", err)
-		os.Exit(1)
+		`CREATE INDEX idx_shipments_created_at ON shipments(created_at)`); err != nil {
+		var myErr *mysqldriver.MySQLError
+		if !errors.As(err, &myErr) || myErr.Number != erDupKeyName {
+			slog.Error("Failed to create index", "error", err)
+			os.Exit(1)
+		}
 	}
 	slog.Info("Database initialized")
 }

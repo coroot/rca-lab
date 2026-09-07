@@ -12,9 +12,9 @@ services:
   payment-service: 1.0.1       # MySQL credentials as discrete parts
   inventory-service: 1.0.3     # perf: persistent conns, opcache tuning, optimized autoloader
   recommendation-service: 1.0.0
-  fulfillment-service: 1.0.2   # idx_shipments_created_at for cheap retention cutoffs
+  fulfillment-service: 1.0.3   # MySQL has no CREATE INDEX IF NOT EXISTS (crashloop on 1.0.2)
   load-generator: 1.1.0         # per-service RPS override (RPS_OVERRIDES)
-  data-seeder: 1.0.6          # created_at indexes on orders + shipments for retention cutoffs
+  data-seeder: 1.0.7          # seed products before inventory; fail loudly; reserve order-id range
   operator: 1.5.0             # UI: per-scenario tech icons; removed the severity column
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).

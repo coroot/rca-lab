@@ -45,6 +45,8 @@ TARGET_SIZE_GB = float(os.getenv("TARGET_SIZE_GB", "10"))
 MYSQL_MAX_ORDERS = int(os.getenv("MYSQL_MAX_ORDERS", "30000"))
 MYSQL_MAX_PAYMENTS = int(os.getenv("MYSQL_MAX_PAYMENTS", "100000"))
 MYSQL_BATCH = int(os.getenv("MYSQL_BATCH", "1000"))
+# Ids to skip past live order traffic before seeding explicit order ids.
+ORDER_ID_GAP = int(os.getenv("ORDER_ID_GAP", "100000"))
 
 # Faker calls (text/company/user_agent/...) cost ~ms each and, under the GIL,
 # serialize across the seeder threads — they, not the databases, are the
@@ -413,9 +415,10 @@ def seed_mysql_orders():
     mysql_ensure_index(cur, "CREATE INDEX idx_shipments_created_at ON shipments(created_at)")
     conn.commit()
 
-    cur.execute("SELECT COALESCE(MAX(id), 0) FROM orders")
-    max_id = cur.fetchone()[0]
-    existing = max_id  # ids are assigned explicitly below, so max ~= count
+    # COUNT(*) is the row count; MAX(id) only allocates ids below. They diverge
+    # because live traffic and the reserved gap leave holes in the id space.
+    cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM orders")
+    existing, max_id = cur.fetchone()
 
     # Each order ~500 bytes + ~3 items at ~200 bytes each = ~1.1KB per order
     target_rows = min(int(TARGET_SIZE_GB * 1024 * 1024 * 1024 / 1100), MYSQL_MAX_ORDERS)
@@ -426,10 +429,19 @@ def seed_mysql_orders():
         conn.close()
         return
 
+    # order-service keeps inserting while we seed, so the explicit ids below
+    # would collide with live AUTO_INCREMENT ids ("Duplicate entry for key
+    # orders.PRIMARY") and abort the run. Carve out a private range: leave
+    # ORDER_ID_GAP ids for inserts racing this statement, then push
+    # AUTO_INCREMENT past the whole seeded block so live rows land above it.
+    base_id = max_id + ORDER_ID_GAP
+    cur.execute(f"ALTER TABLE orders AUTO_INCREMENT = {base_id + remaining}")
+    conn.commit()
+
     log.info(f"Seeding {remaining} orders (~{TARGET_SIZE_GB}GB)")
     inserted = 0
     statuses = ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"]
-    next_id = max_id + 1
+    next_id = base_id
 
     while inserted < remaining:
         batch = min(MYSQL_BATCH, remaining - inserted)
@@ -622,25 +634,44 @@ def seed_valkey_carts():
     log.info(f"Valkey seeding complete: {inserted} keys")
 
 
+def seed_postgres_products_and_inventory():
+    """Seed products, then inventory.
+
+    inventory_stock rows are keyed by product id, so seed_postgres_inventory
+    counts the products table to size its work. Running the two concurrently
+    let it read a partial (often zero) count, conclude there was nothing to do
+    and skip seeding entirely, leaving every order's reservation 404ing.
+    """
+    seed_postgres_products()
+    seed_postgres_inventory()
+
+
 def main():
     target = os.getenv("SEED_TARGET", "all")
     log.info(f"Starting data seeder (target={target}, size={TARGET_SIZE_GB}GB per database)")
 
     if target == "all":
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            futures = [
-                pool.submit(seed_postgres_products),
-                pool.submit(seed_postgres_inventory),
-                pool.submit(seed_mysql_payments),
-                pool.submit(seed_mysql_orders),
-                pool.submit(seed_mongodb_reviews),
-                pool.submit(seed_valkey_carts),
-            ]
-            for f in futures:
+        tasks = [
+            ("postgres-products+inventory", seed_postgres_products_and_inventory),
+            ("mysql-payments", seed_mysql_payments),
+            ("mysql-orders", seed_mysql_orders),
+            ("mongodb", seed_mongodb_reviews),
+            ("valkey", seed_valkey_carts),
+        ]
+        failed = []
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futures = {pool.submit(fn): name for name, fn in tasks}
+            for f, name in futures.items():
                 try:
                     f.result()
                 except Exception as e:
-                    log.error(f"Seeder failed: {e}", exc_info=True)
+                    log.error(f"Seeder failed ({name}): {e}", exc_info=True)
+                    failed.append(name)
+        # Exit non-zero so the Job fails instead of reporting a green deploy
+        # over half-seeded databases.
+        if failed:
+            log.error(f"Data seeding incomplete; failed: {', '.join(failed)}")
+            sys.exit(1)
     elif target == "postgres-products":
         seed_postgres_products()
     elif target == "postgres-inventory":

@@ -1,0 +1,90 @@
+# A schema change removes the index that the "list a user's orders" query depends
+# on. Nothing about the application, its traffic, or the data changes: the same
+# endpoint runs the same query at the same rate. But without the index MySQL has
+# to scan the whole orders table on every call instead of doing a keyed lookup,
+# so rows-read explodes, the database burns CPU, and the latency propagates from
+# order-service up to api-gateway. This is the classic "someone dropped an index"
+# incident, and it is a good test of whether a tool can point at the query and the
+# missing access path rather than just reporting that the database is slow.
+#
+# Note the effect only shows under load: the orders table is small and fully
+# cached, so a scan is cheap at a few requests per second. The workload below
+# supplies the traffic; raise or lower its concurrency to tune the severity.
+apiVersion: rcalab.dev/v1alpha1
+kind: FailureScenario
+metadata:
+  name: sc-26
+  namespace: default
+spec:
+  displayName: Missing index on the orders table
+  description: >-
+    The idx_orders_user_created index is dropped from the orders table, removing
+    the access path for the query behind GET /api/orders/user/{userId}
+    (findByUserIdOrderByIdDesc). MySQL falls back to scanning every row of the
+    orders table on each request, so rows examined per call goes from ~1 to tens
+    of thousands. A workload drives that endpoint through api-gateway, which turns
+    the missing index into a user-visible slowdown: order-service latency rises by
+    an order of magnitude and api-gateway follows, while InnoDB rows-read jumps by
+    two orders of magnitude. Reverting recreates the index, including its
+    descending created_at part, and the plan and latency recover immediately.
+  category: database
+  icon: mysql
+  duration: 30m
+  expectedSymptoms:
+    - order-service latency rises sharply (roughly 20ms to 400ms) with no change in request rate, deployment, or data volume
+    - api-gateway latency follows order-service upward, since it fans out to it
+    - InnoDB rows read per second jumps by ~100x (thousands to over a million) while queries per second stay flat
+    - the orders "WHERE user_id = ? ORDER BY id DESC" query dominates rows-examined and query time; its rows-examined per call goes from ~1 to tens of thousands
+    - EXPLAIN for that query no longer uses idx_orders_user_created; the table is scanned instead of a ref lookup
+    - CPU on the PXC nodes rises, but disk I/O does not, because the table is small enough to stay in the InnoDB buffer pool; the cost is CPU spent scanning cached rows
+    - revert (recreating the index) returns rows-read and latency to baseline within a scrape interval
+  actions:
+    # Drop the index. Statements run in order on one connection in --once mode, so
+    # the session variable persists; the IF() makes it idempotent because MySQL has
+    # no DROP INDEX IF EXISTS. Revert recreates it with the original definition,
+    # including the descending created_at column.
+    - name: a1
+      type: DBExec
+      dbExec:
+        name: sc-26-ddl
+        engine: mysql
+        env:
+          # MYSQL_PASSWORD must be declared before DATABASE_URL so the
+          # $(MYSQL_PASSWORD) reference expands.
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-custom-user-secret
+                key: orders
+          - name: DATABASE_URL
+            value: orders:$(MYSQL_PASSWORD)@tcp(mysql-haproxy:3306)/orders?parseTime=true
+        ensure:
+          - "SET @sql := IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = 'orders' AND table_name = 'orders' AND index_name = 'idx_orders_user_created') > 0, 'ALTER TABLE orders DROP KEY idx_orders_user_created', 'DO 0')"
+          - "PREPARE stmt FROM @sql"
+          - "EXECUTE stmt"
+          - "DEALLOCATE PREPARE stmt"
+        revert:
+          - "SET @sql := IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = 'orders' AND table_name = 'orders' AND index_name = 'idx_orders_user_created') = 0, 'ALTER TABLE orders ADD KEY idx_orders_user_created (user_id, created_at DESC)', 'DO 0')"
+          - "PREPARE stmt FROM @sql"
+          - "EXECUTE stmt"
+          - "DEALLOCATE PREPARE stmt"
+
+    # Traffic against the affected endpoint, through api-gateway so the impact
+    # shows up as a user-facing latency regression rather than only in the
+    # database. Concurrency is the severity knob: 6 workers is enough to make
+    # order-service latency jump ~15x. The delay lets the DDL land first.
+    - name: a2
+      type: Workload
+      delay: 10s
+      workload:
+        name: sc-26-w1
+        image: curlimages/curl:8.10.1
+        concurrency: 6
+        command:
+          - /bin/sh
+          - -c
+          - |
+            while true; do
+              curl -s -o /dev/null -m 10 \
+                "http://api-gateway:8080/api/orders/user/user-$(( (RANDOM % 9999) + 1 ))"
+            done

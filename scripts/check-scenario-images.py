@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validates that every rca-lab image referenced by a FailureScenario resolves
+"""Validates that every rca-lab image referenced by a MaintenanceJob resolves
 to a real, tracked tag — so scenarios can't drift from what CI actually builds.
 
 Sources of truth:

@@ -33,7 +33,7 @@ func TestAppendHistoryCap(t *testing.T) {
 // TestDesiredRunAndStillWanted covers the phase-machine helpers deciding when
 // a run starts and when it should keep running.
 func TestDesiredRunAndStillWanted(t *testing.T) {
-	fs := &v1alpha1.FailureScenario{}
+	fs := &v1alpha1.MaintenanceJob{}
 
 	// Nothing requested.
 	if trig, _, _ := desiredRun(fs); trig != "" {

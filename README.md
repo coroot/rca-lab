@@ -17,9 +17,13 @@ synthetic faults toggled by feature flags. rca-lab takes the opposite approach:
   version and rolled back later; a database incident is an analytics workload
   running heavy queries against the production database; a traffic spike is
   actually more traffic.
-- **Durable revert.** Every failure scenario is a `FailureScenario` custom
+- **Durable revert.** Every failure scenario is a `MaintenanceJob` custom
   resource driven by an operator that restores the normal state when the
   scenario ends, is disabled, or is deleted — even across operator restarts.
+- **The lab does not label its own faults.** Kubernetes events are ingested by
+  most observability backends, so anything the operator does to a CR shows up
+  in the telemetry the tool under test is reading. See
+  [Not giving away the answer](#not-giving-away-the-answer).
 - **Rich telemetry, bring your own backend.** Every service is instrumented
   with OpenTelemetry SDKs: traces, SDK-emitted metrics (JVM/runtime/HTTP), and
   logs (to stdout *and* OTLP, trace-correlated). Everything flows to a bundled
@@ -63,14 +67,14 @@ make clean                  # KEEP_DATA=1 keeps the database volumes
 Scenarios are Kubernetes custom resources:
 
 ```bash
-kubectl get failurescenarios
-kubectl patch failurescenario sc-05 --type=merge -p '{"spec":{"enabled":true}}'
+kubectl get maintenancejobs
+kubectl patch maintenancejob sc-05 --type=merge -p '{"spec":{"enabled":true}}'
 ```
 
 or use the web UI:
 
 ```bash
-kubectl port-forward svc/rca-lab-operator 8080
+kubectl port-forward svc/maintenance-controller 8080
 ```
 
 ![rca-lab scenario library UI — scenarios grouped by category with severity and live state](docs/images/scenarios-ui.png)
@@ -164,6 +168,33 @@ More scenarios (bad migrations, connection-pool leaks, Kafka consumer lag,
 cache eviction pressure, and others) are on the roadmap; each will follow the
 same real-mechanism, durable-revert rule.
 
+## Not giving away the answer
+
+A lab that injects faults tends to leak the answer into the very telemetry the
+tool under test is reading, which quietly turns an RCA benchmark into a reading
+comprehension test. Two leaks we have closed:
+
+**Scenario names.** Naming a workload `heavy-mysql-query` means the name alone
+identifies the fault, so nothing has to be investigated. Scenarios are numbered
+`sc-NN` instead, and the objects they create are named for what they plausibly
+are.
+
+**Kubernetes events.** Most observability backends ingest events cluster-wide.
+Coroot's cluster-agent, for one, forwards every event as a log record carrying
+`object.kind`, `object.name` and `source.component`. So an operator called
+`rca-lab-operator` acting on a `FailureScenario` named `sc-26` puts all three
+words into the log stream, timestamped to the incident. Hence the CRD is
+`MaintenanceJob` in the group `maintenance.platform.dev`, the controller is
+`maintenance-controller`, and the objects it creates carry
+`maintenance.platform.dev/job` rather than anything naming the lab. **Do not
+rename these back for clarity.** They are deliberately boring.
+
+What is *not* hidden is the existence of the lab. Chaos Mesh is installed, the
+CRD is registered, and every application image is `ghcr.io/coroot/rca-lab/…`.
+Anything with cluster read access can work out that this is a test bed, and
+that is fine. The thing worth hiding is narrower: which fault is running, and
+exactly when it started and stopped.
+
 ## Architecture
 
 Edges: **solid** = HTTP, **dotted** = gRPC, **thick** = Kafka event.
@@ -256,6 +287,6 @@ Each is a separate deployable in `services/`, instrumented with OpenTelemetry.
 - `deploy/` — Kubernetes manifests (databases, Kafka, otel, apps) and helm
   values for the operators.
 - `scenarios/` — the failure scenario library.
-- `operator/` — the `FailureScenario` operator, its embedded web UI, and the
+- `operator/` — the `MaintenanceJob` operator, its embedded web UI, and the
   `dbtool` used by database scenario workloads.
 - `scripts/` — `deploy.sh` / `clean.sh` / `status.sh` driven by the Makefile.

@@ -32,8 +32,8 @@
 # (a mongod restart also clears it - the lock is in-memory only). Credentials are
 # read from process.env inside mongosh and never appear on the command line or in
 # the logs.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-18
   namespace: default

@@ -1,20 +1,20 @@
-# The FailureScenario operator
+# The MaintenanceJob operator
 
-The `rca-lab-operator` (in `operator/`) turns declarative `FailureScenario`
+The `maintenance-controller` (in `operator/`) turns declarative `MaintenanceJob`
 custom resources into real, reversible failures. A scenario is the source of
 truth; the operator reconciles the world to match it and — crucially —
 **restores normal state durably**, even across its own crashes.
 
 ## Triggering a scenario
 
-Scenarios live in `scenarios/` and are `FailureScenario` CRs in the `default`
+Scenarios live in `scenarios/` and are `MaintenanceJob` CRs in the `default`
 namespace. Start/stop them with the web UI (`kubectl port-forward
-svc/rca-lab-operator 8080`) or with kubectl:
+svc/maintenance-controller 8080`) or with kubectl:
 
 ```bash
-kubectl get failurescenarios
-kubectl patch failurescenario <name> --type=merge -p '{"spec":{"enabled":true}}'   # start
-kubectl patch failurescenario <name> --type=merge -p '{"spec":{"enabled":false}}'  # stop
+kubectl get maintenancejobs
+kubectl patch maintenancejob <name> --type=merge -p '{"spec":{"enabled":true}}'   # start
+kubectl patch maintenancejob <name> --type=merge -p '{"spec":{"enabled":false}}'  # stop
 ```
 
 `enabled: true` holds the failure until you disable it (or its `duration`
@@ -47,7 +47,8 @@ Every action follows **plan → persist token → mutate**:
 On top of that:
 
 - A **finalizer** guarantees a deleted CR reverts before it disappears.
-- A **startup sweeper** deletes any object labeled `rcalab.dev/scenario` whose
+- A **startup sweeper** deletes any object labeled `maintenance.platform.dev/job`
+  whose
   owning scenario is gone or idle (a backstop for force-deleted CRs).
 - **Dead-man switches** (`activeDeadlineSeconds` on Jobs, `spec.duration` on
   Chaos Mesh objects) self-recover the blast radius even if the operator is
@@ -65,7 +66,7 @@ test/e2e/durability.sh
 
 ## Adding a scenario
 
-1. Write a `FailureScenario` YAML under `scenarios/<category>/` and add it to
+1. Write a `MaintenanceJob` YAML under `scenarios/<category>/` and add it to
    `scenarios/kustomization.yaml`. Give it accurate `expectedSymptoms` — they
    are the grading rubric for RCA tooling.
 2. For a **bad-deploy** scenario, add a variant under

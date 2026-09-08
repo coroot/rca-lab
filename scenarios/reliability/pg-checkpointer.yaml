@@ -9,8 +9,8 @@
 # mismatched to the write rate. A good tool should surface the rising checkpoint
 # frequency and WAL rate. Reverting stops the batch and checkpoints return to the
 # timed cadence.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-21
   namespace: default

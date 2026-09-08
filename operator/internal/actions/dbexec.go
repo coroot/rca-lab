@@ -28,7 +28,7 @@ const (
 	// expected to be quick (re-enable a setting, ANALYZE, delete a marked set).
 	execJobDeadline = 20 * time.Minute
 	// execRevertSuffix names the revert Job relative to the action name.
-	execRevertSuffix = "-revert"
+	execRevertSuffix = "-cleanup"
 )
 
 // DBExecToken is the self-contained revert token of a DBExec action. It carries
@@ -158,7 +158,7 @@ func (d *DBExec) buildJob(rc RunContext, name, engine string, env []corev1.EnvVa
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         v1alpha1.GroupVersion.String(),
-				Kind:               "FailureScenario",
+				Kind:               "MaintenanceJob",
 				Name:               rc.ScenarioName,
 				UID:                rc.ScenarioUID,
 				Controller:         ptr.To(true),

@@ -125,7 +125,7 @@ func (m *ChaosMesh) buildChaos(rc RunContext, ca *v1alpha1.ChaosMeshAction, t Ch
 	obj.SetLabels(map[string]string{ScenarioLabel: rc.ScenarioName})
 	obj.SetOwnerReferences([]metav1.OwnerReference{{
 		APIVersion:         v1alpha1.GroupVersion.String(),
-		Kind:               "FailureScenario",
+		Kind:               "MaintenanceJob",
 		Name:               rc.ScenarioName,
 		UID:                rc.ScenarioUID,
 		Controller:         ptr.To(true),
@@ -175,11 +175,11 @@ func newChaosUnstructured(kind, namespace, name string) *unstructured.Unstructur
 }
 
 // chaosObjectName resolves the chaos object's name: spec.Name or
-// fs-<scenario>-<action>, sanitized to a DNS-1123 subdomain (<=63 chars).
+// mj-<job>-<action>, sanitized to a DNS-1123 subdomain (<=63 chars).
 func chaosObjectName(ca *v1alpha1.ChaosMeshAction, rc RunContext, actionName string) string {
 	name := ca.Name
 	if name == "" {
-		name = fmt.Sprintf("fs-%s-%s", rc.ScenarioName, actionName)
+		name = fmt.Sprintf("mj-%s-%s", rc.ScenarioName, actionName)
 	}
 	return sanitizeDNS1123(name)
 }

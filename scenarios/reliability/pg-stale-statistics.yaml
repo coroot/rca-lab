@@ -7,8 +7,8 @@
 # necessarily bloated, but the OPTIMIZER is flying blind. A good tool should flag
 # that statistics are stale and a large unanalyzed change has occurred — before
 # the mis-estimates cause a slow-query incident.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-23
   namespace: default

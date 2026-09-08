@@ -10,8 +10,8 @@
 # Note the effect only shows under load: the orders table is small and fully
 # cached, so a scan is cheap at a few requests per second. The workload below
 # supplies the traffic; raise or lower its concurrency to tune the severity.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-26
   namespace: default

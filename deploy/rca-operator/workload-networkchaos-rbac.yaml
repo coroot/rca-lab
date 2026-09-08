@@ -5,16 +5,16 @@
 # access to) and creates a NetworkChaos targeting that specific pod, deleting it on
 # revert.
 #
-# Workloads run as the namespace default ServiceAccount (the FailureScenario CRD
+# Workloads run as the namespace default ServiceAccount (the MaintenanceJob CRD
 # does not expose serviceAccountName), so the grant is bound to it. Scoped to
 # NetworkChaos in the default namespace only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: rca-lab-workload-networkchaos
+  name: maintenance-workload-networkchaos
   namespace: default
   labels:
-    app.kubernetes.io/part-of: rca-lab
+    app.kubernetes.io/part-of: platform
 rules:
   - apiGroups: ["chaos-mesh.org"]
     resources: ["networkchaos"]
@@ -23,14 +23,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rca-lab-workload-networkchaos
+  name: maintenance-workload-networkchaos
   namespace: default
   labels:
-    app.kubernetes.io/part-of: rca-lab
+    app.kubernetes.io/part-of: platform
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: rca-lab-workload-networkchaos
+  name: maintenance-workload-networkchaos
 subjects:
   - kind: ServiceAccount
     name: default

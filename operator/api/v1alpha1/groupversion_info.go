@@ -1,8 +1,8 @@
-// Package v1alpha1 contains API Schema definitions for the rcalab.dev v1alpha1
+// Package v1alpha1 contains API Schema definitions for the maintenance.platform.dev v1alpha1
 // API group.
 //
 // +kubebuilder:object:generate=true
-// +groupName=rcalab.dev
+// +groupName=maintenance.platform.dev
 package v1alpha1
 
 import (
@@ -12,7 +12,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "rcalab.dev", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "maintenance.platform.dev", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

@@ -4,8 +4,8 @@
 # its usage collapses well below what it wants, even though nothing is wrong
 # with order-service or its dependencies. Tests whether an RCA tool reasons
 # about node-level CPU contention and locality rather than blaming the victim.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-12
   namespace: default

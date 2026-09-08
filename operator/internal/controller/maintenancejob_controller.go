@@ -1,4 +1,4 @@
-// Package controller reconciles FailureScenario resources.
+// Package controller reconciles MaintenanceJob resources.
 //
 // The reconciler is strictly level-triggered: it never blocks, and every
 // mutation of the world is preceded by persisting a self-contained revert
@@ -32,20 +32,20 @@ import (
 
 const (
 	// FinalizerName guarantees reverts run before a scenario disappears.
-	FinalizerName = "rcalab.dev/revert"
+	FinalizerName = "maintenance.platform.dev/cleanup"
 	// ForceReleaseAnnotation skips draining on deletion; remaining tokens are
 	// dumped into the leaked-state ConfigMap instead.
-	ForceReleaseAnnotation = "rcalab.dev/force-release"
+	ForceReleaseAnnotation = "maintenance.platform.dev/force-release"
 	// LeakedStateConfigMap collects tokens abandoned via force-release.
-	LeakedStateConfigMap = "rca-lab-leaked-state"
+	LeakedStateConfigMap = "maintenance-controller-state"
 
 	historyCap            = 10
 	steadyStateResync     = 30 * time.Second
 	degradedAfterFailures = 5
 )
 
-// FailureScenarioReconciler reconciles FailureScenario objects.
-type FailureScenarioReconciler struct {
+// MaintenanceJobReconciler reconciles MaintenanceJob objects.
+type MaintenanceJobReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
@@ -53,7 +53,7 @@ type FailureScenarioReconciler struct {
 	Namespace     string
 }
 
-// +kubebuilder:rbac:groups=rcalab.dev,resources=failurescenarios;failurescenarios/status;failurescenarios/finalizers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=maintenance.platform.dev,resources=maintenancejobs;maintenancejobs/status;maintenancejobs/finalizers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=create;get;list;watch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=apps,resources=deployments/scale,verbs=get;patch;update
@@ -62,10 +62,10 @@ type FailureScenarioReconciler struct {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;create;update
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
-func (r *FailureScenarioReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	fs := &v1alpha1.FailureScenario{}
+	fs := &v1alpha1.MaintenanceJob{}
 	if err := r.Get(ctx, req.NamespacedName, fs); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -83,7 +83,7 @@ func (r *FailureScenarioReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if err := validateSpec(&fs.Spec); err != nil {
 		log.Info("invalid spec", "error", err)
-		perr := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		perr := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			setCondition(s, fs.Generation, v1alpha1.ConditionReady, metav1.ConditionFalse, "InvalidSpec", err.Error())
 		})
 		return ctrl.Result{}, perr // nothing to do until the spec changes
@@ -118,13 +118,13 @@ func (r *FailureScenarioReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 // maybeStartRun starts a new run if the spec asks for one, otherwise settles
 // into Idle.
-func (r *FailureScenarioReconciler) maybeStartRun(ctx context.Context, fs *v1alpha1.FailureScenario) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) maybeStartRun(ctx context.Context, fs *v1alpha1.MaintenanceJob) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	trigger, runID, duration := desiredRun(fs)
 	if trigger == "" {
 		if fs.Status.Phase != v1alpha1.PhaseIdle || !meta.IsStatusConditionTrue(fs.Status.Conditions, v1alpha1.ConditionReady) {
-			err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+			err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 				s.Phase = v1alpha1.PhaseIdle
 				setCondition(s, fs.Generation, v1alpha1.ConditionReady, metav1.ConditionTrue, "Idle", "scenario is idle")
 			})
@@ -139,7 +139,7 @@ func (r *FailureScenarioReconciler) maybeStartRun(ctx context.Context, fs *v1alp
 		t := metav1.NewTime(now.Add(duration))
 		cr.ExpiresAt = &t
 	}
-	if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+	if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 		s.CurrentRun = cr
 		s.Phase = v1alpha1.PhaseActivating
 	}); err != nil {
@@ -153,7 +153,7 @@ func (r *FailureScenarioReconciler) maybeStartRun(ctx context.Context, fs *v1alp
 // reconcileActivate drives the scenario toward (and holds it in) the injected
 // state. Invariant: each action's revert token is persisted to status before
 // the action mutates anything.
-func (r *FailureScenarioReconciler) reconcileActivate(ctx context.Context, fs *v1alpha1.FailureScenario, run *v1alpha1.CurrentRun) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) reconcileActivate(ctx context.Context, fs *v1alpha1.MaintenanceJob, run *v1alpha1.CurrentRun) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	now := time.Now()
 	rc := r.runContext(fs, run)
@@ -183,7 +183,7 @@ func (r *FailureScenarioReconciler) reconcileActivate(ctx context.Context, fs *v
 			if err != nil {
 				log.Error(err, "plan failed", "action", act.Name)
 				r.Recorder.Eventf(fs, corev1.EventTypeWarning, "PlanFailed", "action %s: %v", act.Name, err)
-				if perr := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+				if perr := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 					setCondition(s, fs.Generation, v1alpha1.ConditionReady, metav1.ConditionFalse, "PlanFailed",
 						fmt.Sprintf("action %s: %v", act.Name, err))
 				}); perr != nil {
@@ -199,7 +199,7 @@ func (r *FailureScenarioReconciler) reconcileActivate(ctx context.Context, fs *v
 				Phase:  v1alpha1.ActionPhaseRecorded,
 				Revert: apiJSON(token),
 			}
-			if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+			if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 				if findActiveAction(s.ActiveActions, act.Name) < 0 {
 					s.ActiveActions = append(s.ActiveActions, aa)
 				}
@@ -256,7 +256,7 @@ func (r *FailureScenarioReconciler) reconcileActivate(ctx context.Context, fs *v
 		phase = v1alpha1.PhaseActive
 	}
 	if fs.Status.Phase != phase || !meta.IsStatusConditionTrue(fs.Status.Conditions, v1alpha1.ConditionReady) {
-		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			s.Phase = phase
 			if allApplied {
 				setCondition(s, fs.Generation, v1alpha1.ConditionReady, metav1.ConditionTrue, "Active", "all actions applied")
@@ -284,7 +284,7 @@ func (r *FailureScenarioReconciler) reconcileActivate(ctx context.Context, fs *v
 // reconcileRevert drains activeActions in reverse order, persisting after
 // every step. run may be nil (crash leftovers); deleting selects
 // finalizer-removal instead of run bookkeeping once drained.
-func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1alpha1.FailureScenario, run *v1alpha1.CurrentRun, deleting bool) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) reconcileRevert(ctx context.Context, fs *v1alpha1.MaintenanceJob, run *v1alpha1.CurrentRun, deleting bool) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if len(fs.Status.ActiveActions) == 0 {
@@ -292,7 +292,7 @@ func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1a
 	}
 
 	if fs.Status.Phase != v1alpha1.PhaseReverting && fs.Status.Phase != v1alpha1.PhaseDegraded {
-		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			s.Phase = v1alpha1.PhaseReverting
 		}); err != nil {
 			return ctrl.Result{}, err
@@ -312,7 +312,7 @@ func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1a
 		log.Error(err, "revert failed", "action", aa.Name, "attempts", attempts)
 		r.Recorder.Eventf(fs, corev1.EventTypeWarning, "RevertFailed", "action %s: %v", aa.Name, err)
 		degraded := attempts >= degradedAfterFailures
-		if perr := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if perr := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			if i := findActiveAction(s.ActiveActions, aa.Name); i >= 0 {
 				s.ActiveActions[i].Phase = v1alpha1.ActionPhaseReverting
 				s.ActiveActions[i].Attempts = attempts
@@ -334,7 +334,7 @@ func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1a
 		if ra <= 0 {
 			ra = 2 * time.Second
 		}
-		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			if i := findActiveAction(s.ActiveActions, aa.Name); i >= 0 {
 				s.ActiveActions[i].Phase = v1alpha1.ActionPhaseReverting
 				s.ActiveActions[i].LastError = ""
@@ -347,7 +347,7 @@ func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1a
 
 	// Drained one action: persist its removal, then continue immediately.
 	log.Info("action reverted", "action", aa.Name)
-	if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+	if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 		if i := findActiveAction(s.ActiveActions, aa.Name); i >= 0 {
 			s.ActiveActions = append(s.ActiveActions[:i], s.ActiveActions[i+1:]...)
 		}
@@ -358,7 +358,7 @@ func (r *FailureScenarioReconciler) reconcileRevert(ctx context.Context, fs *v1a
 }
 
 // finishRun closes the books on a drained run.
-func (r *FailureScenarioReconciler) finishRun(ctx context.Context, fs *v1alpha1.FailureScenario, run *v1alpha1.CurrentRun, deleting bool, result, message string) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) finishRun(ctx context.Context, fs *v1alpha1.MaintenanceJob, run *v1alpha1.CurrentRun, deleting bool, result, message string) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if deleting {
@@ -379,7 +379,7 @@ func (r *FailureScenarioReconciler) finishRun(ctx context.Context, fs *v1alpha1.
 			Result:    result,
 			Message:   message,
 		}
-		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			s.History = appendHistory(s.History, entry)
 			s.LastCompletedRunID = run.ID
 			s.CurrentRun = nil
@@ -392,7 +392,7 @@ func (r *FailureScenarioReconciler) finishRun(ctx context.Context, fs *v1alpha1.
 		log.Info("run finished", "runID", run.ID, "result", result)
 		r.Recorder.Eventf(fs, corev1.EventTypeNormal, "RunFinished", "run %s finished: %s", run.ID, result)
 	} else if fs.Status.Phase != v1alpha1.PhaseIdle {
-		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.FailureScenarioStatus) {
+		if err := r.patchStatus(ctx, fs, func(s *v1alpha1.MaintenanceJobStatus) {
 			s.Phase = v1alpha1.PhaseIdle
 			meta.RemoveStatusCondition(&s.Conditions, v1alpha1.ConditionRevertFailed)
 		}); err != nil {
@@ -405,7 +405,7 @@ func (r *FailureScenarioReconciler) finishRun(ctx context.Context, fs *v1alpha1.
 // reconcileDelete drains active actions before releasing the finalizer. With
 // the force-release annotation, remaining tokens are dumped into the
 // leaked-state ConfigMap instead.
-func (r *FailureScenarioReconciler) reconcileDelete(ctx context.Context, fs *v1alpha1.FailureScenario) (ctrl.Result, error) {
+func (r *MaintenanceJobReconciler) reconcileDelete(ctx context.Context, fs *v1alpha1.MaintenanceJob) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	if !controllerutil.ContainsFinalizer(fs, FinalizerName) {
 		return ctrl.Result{}, nil
@@ -425,8 +425,8 @@ func (r *FailureScenarioReconciler) reconcileDelete(ctx context.Context, fs *v1a
 }
 
 // leakState appends the scenario's remaining revert tokens to the
-// rca-lab-leaked-state ConfigMap.
-func (r *FailureScenarioReconciler) leakState(ctx context.Context, fs *v1alpha1.FailureScenario) error {
+// maintenance-controller-state ConfigMap.
+func (r *MaintenanceJobReconciler) leakState(ctx context.Context, fs *v1alpha1.MaintenanceJob) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{Namespace: r.Namespace, Name: LeakedStateConfigMap}
@@ -451,7 +451,7 @@ func (r *FailureScenarioReconciler) leakState(ctx context.Context, fs *v1alpha1.
 	})
 }
 
-func (r *FailureScenarioReconciler) runContext(fs *v1alpha1.FailureScenario, run *v1alpha1.CurrentRun) actions.RunContext {
+func (r *MaintenanceJobReconciler) runContext(fs *v1alpha1.MaintenanceJob, run *v1alpha1.CurrentRun) actions.RunContext {
 	rc := actions.RunContext{
 		ScenarioName:  fs.Name,
 		ScenarioUID:   fs.UID,
@@ -471,9 +471,9 @@ func (r *FailureScenarioReconciler) runContext(fs *v1alpha1.FailureScenario, run
 // fs with the persisted object. Returning nil guarantees the mutation is
 // durable in the API server (the plan->persist->mutate invariant relies on
 // this).
-func (r *FailureScenarioReconciler) patchStatus(ctx context.Context, fs *v1alpha1.FailureScenario, mutate func(*v1alpha1.FailureScenarioStatus)) error {
+func (r *MaintenanceJobReconciler) patchStatus(ctx context.Context, fs *v1alpha1.MaintenanceJob, mutate func(*v1alpha1.MaintenanceJobStatus)) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &v1alpha1.FailureScenario{}
+		latest := &v1alpha1.MaintenanceJob{}
 		if err := r.Get(ctx, client.ObjectKeyFromObject(fs), latest); err != nil {
 			return err
 		}
@@ -488,11 +488,11 @@ func (r *FailureScenarioReconciler) patchStatus(ctx context.Context, fs *v1alpha
 }
 
 // SetupWithManager wires the controller into the manager.
-func (r *FailureScenarioReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *MaintenanceJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.FailureScenario{}).
+		For(&v1alpha1.MaintenanceJob{}).
 		Owns(&batchv1.Job{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 4}).
-		Named("failurescenario").
+		Named("maintenancejob").
 		Complete(r)
 }

@@ -12,8 +12,8 @@
 # produces repeated elections - the flapping-primary reliability problem a good
 # tool should surface (primary changes, brief no-primary gaps). Reverting deletes
 # the job; the last-elected primary simply stays.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-02
   namespace: default

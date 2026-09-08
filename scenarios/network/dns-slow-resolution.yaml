@@ -5,8 +5,8 @@
 # slow lookup on each new connection, so their egress gets intermittently slow
 # while every dependency is perfectly healthy: the classic "it's always DNS"
 # incident. The tell is DNS query latency (Coroot's DNS view), not any single hop.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-14
   namespace: default

@@ -21,7 +21,7 @@ generate:
 ## manifests: regenerate the committed CRD in deploy/rca-operator/
 manifests:
 	$(CONTROLLER_GEN) crd paths=./api/... output:crd:artifacts:config=.crd-tmp
-	mv .crd-tmp/rcalab.dev_failurescenarios.yaml ../deploy/rca-operator/crd.yaml
+	mv .crd-tmp/maintenance.platform.dev_maintenancejobs.yaml ../deploy/rca-operator/crd.yaml
 	rmdir .crd-tmp
 
 docker-build:

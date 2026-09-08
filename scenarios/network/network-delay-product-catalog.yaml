@@ -3,8 +3,8 @@
 # latency propagates upstream to the api-gateway — with no change in CPU,
 # error rate, or query time at product-catalog itself: a pure "where did the
 # time go" network-path signal.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-15
   namespace: default

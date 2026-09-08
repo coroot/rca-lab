@@ -3,8 +3,8 @@
 # "content safety" scan runs a pure-CPU loop on the request path, blocking the
 # single-threaded Node.js event loop for tens of milliseconds per read. The
 # rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-11
   namespace: default

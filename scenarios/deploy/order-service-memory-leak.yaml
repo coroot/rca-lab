@@ -5,8 +5,8 @@
 # objects, so GC tracing cost grows and latency degrades gradually (as opposed
 # to the fast OOM crash-leak in order-service-gc-regression / 1.3.0). The
 # rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-08
   namespace: default

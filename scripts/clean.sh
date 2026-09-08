@@ -21,9 +21,9 @@ if [ -z "$YES" ]; then
     [ "$ans" = y ] || [ "$ans" = Y ] || die "aborted"
 fi
 
-if kubectl get crd failurescenarios.rcalab.dev >/dev/null 2>&1; then
+if kubectl get crd maintenancejobs.maintenance.platform.dev >/dev/null 2>&1; then
     info "Deleting failure scenarios (waits for reverts)"
-    kubectl delete failurescenarios --all -n default --timeout=10m || true
+    kubectl delete maintenancejobs --all -n default --timeout=10m || true
 fi
 
 if [ -f deploy/rca-operator/kustomization.yaml ]; then

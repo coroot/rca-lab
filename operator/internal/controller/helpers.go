@@ -14,7 +14,7 @@ import (
 )
 
 // validateSpec is the webhook-free safety net behind the CRD's CEL rules.
-func validateSpec(spec *v1alpha1.FailureScenarioSpec) error {
+func validateSpec(spec *v1alpha1.MaintenanceJobSpec) error {
 	if len(spec.Actions) == 0 {
 		return fmt.Errorf("spec.actions must contain at least one action")
 	}
@@ -58,7 +58,7 @@ func validateSpec(spec *v1alpha1.FailureScenarioSpec) error {
 
 // desiredRun decides whether a new run should start. Returns trigger=="" when
 // nothing is wanted. Sticky enabled wins over a pending manual trigger.
-func desiredRun(fs *v1alpha1.FailureScenario) (trigger, runID string, duration time.Duration) {
+func desiredRun(fs *v1alpha1.MaintenanceJob) (trigger, runID string, duration time.Duration) {
 	if fs.Spec.Duration != nil {
 		duration = fs.Spec.Duration.Duration
 	}
@@ -77,7 +77,7 @@ func desiredRun(fs *v1alpha1.FailureScenario) (trigger, runID string, duration t
 
 // runStillWanted reports whether the in-flight run is still requested by the
 // spec (expiry is checked separately).
-func runStillWanted(fs *v1alpha1.FailureScenario, run *v1alpha1.CurrentRun) bool {
+func runStillWanted(fs *v1alpha1.MaintenanceJob, run *v1alpha1.CurrentRun) bool {
 	switch run.Trigger {
 	case v1alpha1.RunTriggerEnabled:
 		return fs.Spec.Enabled
@@ -98,8 +98,8 @@ func findActiveAction(list []v1alpha1.ActiveAction, name string) int {
 
 // statusMutation returns a patchStatus mutation targeting one active action by
 // name (index-safe against concurrent status changes).
-func statusMutation(name string, f func(*v1alpha1.ActiveAction)) func(*v1alpha1.FailureScenarioStatus) {
-	return func(s *v1alpha1.FailureScenarioStatus) {
+func statusMutation(name string, f func(*v1alpha1.ActiveAction)) func(*v1alpha1.MaintenanceJobStatus) {
+	return func(s *v1alpha1.MaintenanceJobStatus) {
 		if i := findActiveAction(s.ActiveActions, name); i >= 0 {
 			f(&s.ActiveActions[i])
 		}
@@ -136,7 +136,7 @@ func backoffFor(attempts int32) time.Duration {
 	return min(30*time.Second, time.Second<<uint(attempts-1))
 }
 
-func setCondition(s *v1alpha1.FailureScenarioStatus, generation int64, condType string, status metav1.ConditionStatus, reason, message string) {
+func setCondition(s *v1alpha1.MaintenanceJobStatus, generation int64, condType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&s.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             status,

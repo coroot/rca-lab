@@ -1,6 +1,6 @@
 // The rca-lab operator binary. Subcommands:
 //
-//	manager (default) — run the FailureScenario controller manager
+//	manager (default) — run the MaintenanceJob controller manager
 //	dbtool            — query-loop runner used by Workload scenario Jobs
 package main
 
@@ -60,7 +60,7 @@ func runManager(_ []string) {
 
 	scheme := clientgoscheme.Scheme
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		setupLog.Error(err, "unable to add rcalab.dev scheme")
+		setupLog.Error(err, "unable to add maintenance.platform.dev scheme")
 		os.Exit(1)
 	}
 
@@ -69,7 +69,7 @@ func runManager(_ []string) {
 		HealthProbeBindAddress:  ":8081",
 		Metrics:                 metricsserver.Options{BindAddress: ":8082"},
 		LeaderElection:          true,
-		LeaderElectionID:        "rca-lab-operator",
+		LeaderElectionID:        "maintenance-controller",
 		LeaderElectionNamespace: namespace,
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{namespace: {}},
@@ -80,15 +80,15 @@ func runManager(_ []string) {
 		os.Exit(1)
 	}
 
-	reconciler := &controller.FailureScenarioReconciler{
+	reconciler := &controller.MaintenanceJobReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
-		Recorder:      mgr.GetEventRecorderFor("rca-lab-operator"),
+		Recorder:      mgr.GetEventRecorderFor("maintenance-controller"),
 		OperatorImage: operatorImage,
 		Namespace:     namespace,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to set up FailureScenario controller")
+		setupLog.Error(err, "unable to set up MaintenanceJob controller")
 		os.Exit(1)
 	}
 

@@ -6,8 +6,8 @@
 # at the extreme it is what leads to xid-wraparound emergencies. The distinctive
 # tell versus plain bloat: autovacuum IS running (last_autovacuum is recent), but
 # a very old transaction / large backend_xmin age is holding the horizon back.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-25
   namespace: default

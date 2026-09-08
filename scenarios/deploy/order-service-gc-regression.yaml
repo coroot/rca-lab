@@ -2,8 +2,8 @@
 # variant (services/order-service/variants/allocation-regression/) — real code
 # that deep-copies every order read into an ineffective LRU cache. The rollout
 # looks like a normal version bump; the revert is a rollback to 1.0.0.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-07
   namespace: default

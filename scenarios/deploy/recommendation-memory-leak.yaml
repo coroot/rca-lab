@@ -3,8 +3,8 @@
 # Every gRPC call retains a ~256KB "personalization profile" in an unbounded
 # map, so RSS climbs until the container hits its memory limit and is
 # OOMKilled, then restarts — a memory leak introduced by a new release.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-10
   namespace: default

@@ -6,8 +6,8 @@
 # monitoring tool should flag the developing bloat (dead-tuple ratio, table
 # growth, autovacuum disabled) BEFORE it turns into an outage — that detection,
 # not an RCA on a live symptom, is what this scenario exercises.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-24
   namespace: default

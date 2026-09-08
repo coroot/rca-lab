@@ -1,5 +1,5 @@
 // Package actions implements the failure-injection primitives used by
-// FailureScenario runs.
+// MaintenanceJob runs.
 //
 // The contract that makes reverts crash-safe: Plan is a read-only observation
 // of live state that returns a fully self-contained revert token. The
@@ -22,11 +22,11 @@ import (
 // Shared labels/annotations.
 const (
 	// ScenarioLabel marks every object created by the operator with the
-	// owning FailureScenario name.
-	ScenarioLabel = "rcalab.dev/scenario"
+	// owning MaintenanceJob name.
+	ScenarioLabel = "maintenance.platform.dev/job"
 	// HeldByAnnotation is stamped on mutated (not created) targets, value
 	// "<scenario>/<runID>".
-	HeldByAnnotation = "rcalab.dev/held-by"
+	HeldByAnnotation = "maintenance.platform.dev/held-by"
 )
 
 // RunContext carries run-scoped facts an action may need.

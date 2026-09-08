@@ -224,8 +224,8 @@ type Action struct {
 	DBExec *DBExecAction `json:"dbExec,omitempty"`
 }
 
-// FailureScenarioSpec defines the desired state of a FailureScenario.
-type FailureScenarioSpec struct {
+// MaintenanceJobSpec defines the desired state of a MaintenanceJob.
+type MaintenanceJobSpec struct {
 	DisplayName string `json:"displayName"`
 	// +optional
 	Description string `json:"description,omitempty"`
@@ -296,8 +296,8 @@ type RunHistoryEntry struct {
 	Message string `json:"message,omitempty"`
 }
 
-// FailureScenarioStatus defines the observed state of a FailureScenario.
-type FailureScenarioStatus struct {
+// MaintenanceJobStatus defines the observed state of a MaintenanceJob.
+type MaintenanceJobStatus struct {
 	// +kubebuilder:validation:Enum=Idle;Activating;Active;Reverting;Degraded
 	// +kubebuilder:default=Idle
 	// +optional
@@ -319,32 +319,32 @@ type FailureScenarioStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=fs
+// +kubebuilder:resource:shortName=mj
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Category",type=string,JSONPath=`.spec.category`
 // +kubebuilder:printcolumn:name="Enabled",type=boolean,JSONPath=`.spec.enabled`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// FailureScenario is a reproducible failure that the operator can inject and
+// MaintenanceJob is a reproducible failure that the operator can inject and
 // durably revert.
-type FailureScenario struct {
+type MaintenanceJob struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec FailureScenarioSpec `json:"spec"`
+	Spec MaintenanceJobSpec `json:"spec"`
 	// +optional
-	Status FailureScenarioStatus `json:"status,omitempty"`
+	Status MaintenanceJobStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// FailureScenarioList contains a list of FailureScenario.
-type FailureScenarioList struct {
+// MaintenanceJobList contains a list of MaintenanceJob.
+type MaintenanceJobList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []FailureScenario `json:"items"`
+	Items           []MaintenanceJob `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&FailureScenario{}, &FailureScenarioList{})
+	SchemeBuilder.Register(&MaintenanceJob{}, &MaintenanceJobList{})
 }

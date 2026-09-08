@@ -195,7 +195,7 @@ func (w *Workload) buildJob(rc RunContext, spec *v1alpha1.Action) *batchv1.Job {
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         v1alpha1.GroupVersion.String(),
-				Kind:               "FailureScenario",
+				Kind:               "MaintenanceJob",
 				Name:               rc.ScenarioName,
 				UID:                rc.ScenarioUID,
 				Controller:         ptr.To(true),

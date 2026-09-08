@@ -8,8 +8,8 @@
 # well before it matters. The mechanism is a real network condition on the
 # replica (Chaos Mesh netem), not a fabricated metric, so the standby genuinely
 # lags. Reverting removes the latency and the replica catches back up.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-22
   namespace: default

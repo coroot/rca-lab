@@ -282,7 +282,7 @@ apply_scenarios() {
     fi
     info "Deploying scenario operator + library"
     apply_kustomize_with_image_tags deploy/rca-operator
-    kubectl rollout status deployment/rca-lab-operator -n default --timeout=5m
+    kubectl rollout status deployment/maintenance-controller -n default --timeout=5m
     [ -f scenarios/kustomization.yaml ] && kubectl apply -k scenarios
 }
 
@@ -321,7 +321,7 @@ rca-lab is up.
 
   Traffic:    load-generator -> api-gateway -> services (continuous)
   Telemetry:  all services -> otel-collector, ${OTLP_ENDPOINT:+forwarding ${OTLP_SIGNALS} to ${OTLP_ENDPOINT}}${OTLP_ENDPOINT:-discarding (set OTLP_ENDPOINT=host:4317 to forward)}
-  Scenarios:  kubectl get failurescenarios   (web UI: kubectl port-forward svc/rca-lab-operator 8080)
+  Scenarios:  kubectl get maintenancejobs   (web UI: kubectl port-forward svc/maintenance-controller 8080)
   Status:     make status
 EOF
 }

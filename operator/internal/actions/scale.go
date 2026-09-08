@@ -66,7 +66,7 @@ func (s *Scale) Ensure(ctx context.Context, c client.Client, rc RunContext, spec
 	heldBy := rc.ScenarioName + "/" + rc.RunID
 	if cur := dep.Annotations[HeldByAnnotation]; cur != "" && !strings.HasPrefix(cur, rc.ScenarioName+"/") {
 		otherName, _, _ := strings.Cut(cur, "/")
-		other := &v1alpha1.FailureScenario{}
+		other := &v1alpha1.MaintenanceJob{}
 		err := c.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: otherName}, other)
 		switch {
 		case err == nil && (other.Status.CurrentRun != nil || len(other.Status.ActiveActions) > 0):

@@ -1,5 +1,5 @@
 // Package api serves a small REST API and an embedded web UI for driving
-// FailureScenario resources. The Server is a controller-runtime
+// MaintenanceJob resources. The Server is a controller-runtime
 // manager.Runnable: it runs an http.Server on the configured address using the
 // manager's cached client for reads and writes, and shuts down cleanly when the
 // manager's context is cancelled.
@@ -112,7 +112,7 @@ func (s *Server) routes() http.Handler {
 
 // ---- REST handlers ----
 
-// scenarioSummary is the list-view projection of a FailureScenario.
+// scenarioSummary is the list-view projection of a MaintenanceJob.
 type scenarioSummary struct {
 	Name               string               `json:"name"`
 	DisplayName        string               `json:"displayName"`
@@ -136,7 +136,7 @@ type scenarioDetail struct {
 	Conditions    []metav1.Condition         `json:"conditions"`
 }
 
-func summarize(fs *v1alpha1.FailureScenario) scenarioSummary {
+func summarize(fs *v1alpha1.MaintenanceJob) scenarioSummary {
 	symptoms := fs.Spec.ExpectedSymptoms
 	if symptoms == nil {
 		symptoms = []string{}
@@ -160,7 +160,7 @@ func summarize(fs *v1alpha1.FailureScenario) scenarioSummary {
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	list := &v1alpha1.FailureScenarioList{}
+	list := &v1alpha1.MaintenanceJobList{}
 	if err := s.client.List(r.Context(), list, client.InNamespace(scenarioNamespace)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -205,7 +205,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEnable(w http.ResponseWriter, r *http.Request) {
-	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.FailureScenario) {
+	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.MaintenanceJob) {
 		fs.Spec.Enabled = true
 	}); err != nil {
 		writeClientError(w, err)
@@ -215,7 +215,7 @@ func (s *Server) handleEnable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
-	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.FailureScenario) {
+	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.MaintenanceJob) {
 		fs.Spec.Enabled = false
 		fs.Spec.Trigger = nil
 	}); err != nil {
@@ -248,7 +248,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := uuid.NewString()
-	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.FailureScenario) {
+	if err := s.mutate(r.Context(), r.PathValue("name"), func(fs *v1alpha1.MaintenanceJob) {
 		fs.Spec.Trigger = &v1alpha1.TriggerSpec{
 			RunID:    runID,
 			Duration: &metav1.Duration{Duration: duration},
@@ -261,14 +261,14 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
-	list := &v1alpha1.FailureScenarioList{}
+	list := &v1alpha1.MaintenanceJobList{}
 	if err := s.client.List(r.Context(), list, client.InNamespace(scenarioNamespace)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	for i := range list.Items {
 		name := list.Items[i].Name
-		if err := s.mutate(r.Context(), name, func(fs *v1alpha1.FailureScenario) {
+		if err := s.mutate(r.Context(), name, func(fs *v1alpha1.MaintenanceJob) {
 			fs.Spec.Enabled = false
 			fs.Spec.Trigger = nil
 		}); err != nil {
@@ -281,8 +281,8 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 
 // ---- client helpers ----
 
-func (s *Server) get(ctx context.Context, name string) (*v1alpha1.FailureScenario, error) {
-	fs := &v1alpha1.FailureScenario{}
+func (s *Server) get(ctx context.Context, name string) (*v1alpha1.MaintenanceJob, error) {
+	fs := &v1alpha1.MaintenanceJob{}
 	key := types.NamespacedName{Namespace: scenarioNamespace, Name: name}
 	if err := s.client.Get(ctx, key, fs); err != nil {
 		return nil, err
@@ -292,9 +292,9 @@ func (s *Server) get(ctx context.Context, name string) (*v1alpha1.FailureScenari
 
 // mutate applies a spec mutation with retry-on-conflict. It always re-reads the
 // latest object before applying the change.
-func (s *Server) mutate(ctx context.Context, name string, apply func(*v1alpha1.FailureScenario)) error {
+func (s *Server) mutate(ctx context.Context, name string, apply func(*v1alpha1.MaintenanceJob)) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		fs := &v1alpha1.FailureScenario{}
+		fs := &v1alpha1.MaintenanceJob{}
 		key := types.NamespacedName{Namespace: scenarioNamespace, Name: name}
 		if err := s.client.Get(ctx, key, fs); err != nil {
 			return err

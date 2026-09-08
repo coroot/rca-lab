@@ -3,17 +3,17 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
-  name: failurescenarios.rcalab.dev
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: maintenancejobs.maintenance.platform.dev
 spec:
-  group: rcalab.dev
+  group: maintenance.platform.dev
   names:
-    kind: FailureScenario
-    listKind: FailureScenarioList
-    plural: failurescenarios
+    kind: MaintenanceJob
+    listKind: MaintenanceJobList
+    plural: maintenancejobs
     shortNames:
-    - fs
-    singular: failurescenario
+    - mj
+    singular: maintenancejob
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -33,7 +33,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          FailureScenario is a reproducible failure that the operator can inject and
+          MaintenanceJob is a reproducible failure that the operator can inject and
           durably revert.
         properties:
           apiVersion:
@@ -54,7 +54,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: FailureScenarioSpec defines the desired state of a FailureScenario.
+            description: MaintenanceJobSpec defines the desired state of a MaintenanceJob.
             properties:
               actions:
                 items:
@@ -682,7 +682,7 @@ spec:
             - displayName
             type: object
           status:
-            description: FailureScenarioStatus defines the observed state of a FailureScenario.
+            description: MaintenanceJobStatus defines the observed state of a MaintenanceJob.
             properties:
               activeActions:
                 items:

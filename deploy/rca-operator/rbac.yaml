@@ -1,29 +1,29 @@
-# Least-privilege RBAC for the rca-lab operator: everything it touches lives
+# Least-privilege RBAC for the maintenance controller: everything it touches lives
 # in the default namespace. Deliberately NO access to Secrets — workload Jobs
 # reference them via secretKeyRef, resolved by the kubelet, not the operator.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: rca-lab-operator
+  name: maintenance-controller
   namespace: default
   labels:
-    app: rca-lab-operator
-    app.kubernetes.io/part-of: rca-lab
+    app: maintenance-controller
+    app.kubernetes.io/part-of: platform
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: rca-lab-operator
+  name: maintenance-controller
   namespace: default
   labels:
-    app: rca-lab-operator
-    app.kubernetes.io/part-of: rca-lab
+    app: maintenance-controller
+    app.kubernetes.io/part-of: platform
 rules:
-  - apiGroups: ["rcalab.dev"]
+  - apiGroups: ["maintenance.platform.dev"]
     resources:
-      - failurescenarios
-      - failurescenarios/status
-      - failurescenarios/finalizers
+      - maintenancejobs
+      - maintenancejobs/status
+      - maintenancejobs/finalizers
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["batch"]
     resources: [jobs]
@@ -40,7 +40,7 @@ rules:
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
-  # rca-lab-leaked-state (force-release token dump)
+  # maintenance-controller-state (force-release token dump)
   - apiGroups: [""]
     resources: [configmaps]
     verbs: [get, create, update]
@@ -56,16 +56,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rca-lab-operator
+  name: maintenance-controller
   namespace: default
   labels:
-    app: rca-lab-operator
-    app.kubernetes.io/part-of: rca-lab
+    app: maintenance-controller
+    app.kubernetes.io/part-of: platform
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: rca-lab-operator
+  name: maintenance-controller
 subjects:
   - kind: ServiceAccount
-    name: rca-lab-operator
+    name: maintenance-controller
     namespace: default

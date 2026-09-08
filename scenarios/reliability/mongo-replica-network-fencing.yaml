@@ -24,8 +24,8 @@
 # Self-heals: reverting deletes the NetworkChaos and the member reconnects, replays
 # the oplog backlog, and its lag returns to ~0 (a full resync only if it was fenced
 # longer than the oplog window).
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-17
   namespace: default

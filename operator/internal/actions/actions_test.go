@@ -168,7 +168,7 @@ func TestChaosMeshTokenAndBuild(t *testing.T) {
 	m := &ChaosMesh{}
 
 	name := chaosObjectName(ca, rc, spec.Name)
-	if name != "fs-pg-analytics-queries-net-delay" {
+	if name != "mj-pg-analytics-queries-net-delay" {
 		t.Fatalf("name = %q", name)
 	}
 
@@ -261,7 +261,7 @@ func TestDBExecEnsureRevert(t *testing.T) {
 	if err := json.Unmarshal(raw, &tok); err != nil {
 		t.Fatalf("token does not round-trip: %v", err)
 	}
-	if tok.EnsureName != "disable-autovacuum" || tok.RevertName != "disable-autovacuum-revert" || len(tok.Revert) != 2 {
+	if tok.EnsureName != "disable-autovacuum" || tok.RevertName != "disable-autovacuum-cleanup" || len(tok.Revert) != 2 {
 		t.Fatalf("token = %+v", tok)
 	}
 
@@ -291,7 +291,7 @@ func TestDBExecEnsureRevert(t *testing.T) {
 	if err != nil || done {
 		t.Fatalf("Revert #1: done=%v err=%v", done, err)
 	}
-	markJobSucceeded(t, ctx, c, "disable-autovacuum-revert")
+	markJobSucceeded(t, ctx, c, "disable-autovacuum-cleanup")
 	done, _, err = d.Revert(ctx, c, rc, raw)
 	if err != nil || !done {
 		t.Fatalf("Revert #2: done=%v err=%v", done, err)
@@ -303,7 +303,7 @@ func TestDBExecEnsureRevert(t *testing.T) {
 func TestDBExecRevertEmpty(t *testing.T) {
 	ctx := context.Background()
 	rc := testRC()
-	tok, _ := json.Marshal(DBExecToken{Namespace: "default", Engine: "postgres", EnsureName: "x", RevertName: "x-revert"})
+	tok, _ := json.Marshal(DBExecToken{Namespace: "default", Engine: "postgres", EnsureName: "x", RevertName: "x-cleanup"})
 	d := &DBExec{}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	done, _, err := d.Revert(ctx, c, rc, tok)

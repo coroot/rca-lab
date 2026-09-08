@@ -16,9 +16,9 @@ import (
 )
 
 // Sweeper runs once at manager start (leader only) and deletes objects
-// labeled rcalab.dev/scenario whose owning scenario no longer exists or is
-// idle with no recorded active actions. It is the belt-and-braces companion
-// to ownerReference GC for state orphaned across operator restarts.
+// labeled maintenance.platform.dev/job whose owning scenario no longer exists
+// or is idle with no recorded active actions. It is the belt-and-braces
+// companion to ownerReference GC for state orphaned across operator restarts.
 type Sweeper struct {
 	Client    client.Client
 	Namespace string
@@ -59,11 +59,11 @@ func (s *Sweeper) sweep(ctx context.Context, obj client.Object, kind string) {
 	log := logf.Log.WithName("sweeper")
 	scenarioName := obj.GetLabels()[actions.ScenarioLabel]
 
-	fs := &v1alpha1.FailureScenario{}
+	fs := &v1alpha1.MaintenanceJob{}
 	err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: scenarioName}, fs)
 	switch {
 	case apierrors.IsNotFound(err):
-		log.Info("ORPHANED OBJECT: owning FailureScenario does not exist, deleting",
+		log.Info("ORPHANED OBJECT: owning MaintenanceJob does not exist, deleting",
 			"kind", kind, "name", obj.GetName(), "scenario", scenarioName)
 	case err != nil:
 		log.Error(err, "failed to look up owning scenario, keeping object",
@@ -75,7 +75,7 @@ func (s *Sweeper) sweep(ctx context.Context, obj client.Object, kind string) {
 		if !idle {
 			return
 		}
-		log.Info("ORPHANED OBJECT: owning FailureScenario is idle with no active actions, deleting",
+		log.Info("ORPHANED OBJECT: owning MaintenanceJob is idle with no active actions, deleting",
 			"kind", kind, "name", obj.GetName(), "scenario", scenarioName)
 	}
 

@@ -22,8 +22,8 @@
 # Self-heals: reverting deletes the NetworkChaos and the node rejoins the Primary
 # Component - via IST from the gcache, or a full SST if it was out longer than the
 # gcache window, during which its state shows Joining before it returns to Synced.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-20
   namespace: default

@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rca-lab-operator
+  name: maintenance-controller
   namespace: default
   labels:
-    app: rca-lab-operator
-    app.kubernetes.io/part-of: rca-lab
+    app: maintenance-controller
+    app.kubernetes.io/part-of: platform
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: rca-lab-operator
+      app: maintenance-controller
   template:
     metadata:
       labels:
-        app: rca-lab-operator
-        app.kubernetes.io/part-of: rca-lab
+        app: maintenance-controller
+        app.kubernetes.io/part-of: platform
     spec:
-      serviceAccountName: rca-lab-operator
+      serviceAccountName: maintenance-controller
       containers:
         - name: operator
           image: ghcr.io/coroot/rca-lab/operator:1.0.0
@@ -66,14 +66,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: rca-lab-operator
+  name: maintenance-controller
   namespace: default
   labels:
-    app: rca-lab-operator
-    app.kubernetes.io/part-of: rca-lab
+    app: maintenance-controller
+    app.kubernetes.io/part-of: platform
 spec:
   selector:
-    app: rca-lab-operator
+    app: maintenance-controller
   ports:
     - name: http # web UI (future)
       port: 8080

@@ -4,8 +4,8 @@
 # short-lived scratch buffers on every read path. Nothing is retained (no leak),
 # but the allocation rate explodes and the Go GC runs almost continuously. The
 # rollout looks like a normal version bump; the revert is a rollback to 1.0.0.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-09
   namespace: default

@@ -35,7 +35,7 @@ kubectl get deploy -n default -l part-of=rca-lab \
 
 printf '\n%sSCENARIOS%s\n' "$bold" "$rst"
 printf '  %-32s %-10s %s\n' "NAME" "STATE" "FAILURE TYPE"
-scen=$(kubectl get failurescenarios -n default \
+scen=$(kubectl get maintenancejobs -n default \
     -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,CAT:.spec.category' \
     --no-headers 2>/dev/null || true)
 if [ -n "$scen" ]; then

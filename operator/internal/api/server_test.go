@@ -9,9 +9,9 @@ import (
 )
 
 func TestSummarizeDefaultsPhaseAndSymptoms(t *testing.T) {
-	fs := &v1alpha1.FailureScenario{
+	fs := &v1alpha1.MaintenanceJob{
 		ObjectMeta: metav1.ObjectMeta{Name: "db-slow"},
-		Spec: v1alpha1.FailureScenarioSpec{
+		Spec: v1alpha1.MaintenanceJobSpec{
 			DisplayName: "Slow DB",
 			Category:    "database",
 			Icon:        "mysql",

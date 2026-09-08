@@ -4,8 +4,8 @@
 # exactly what a migration issues first); the stall is a pg_sleep standing in
 # for a migration blocked on a slow step. PostgreSQL does no work while it holds
 # the lock, so the tell is lock waits, not resource saturation.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-06
   namespace: default

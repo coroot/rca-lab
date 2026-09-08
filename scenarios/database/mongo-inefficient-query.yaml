@@ -15,8 +15,8 @@
 # attribute the disk load and latency to it. The mechanism is a real unindexed
 # query workload, not a fabricated metric. Reverting stops the queries and the
 # disk load and latency subside; the real fix would be to add the missing index.
-apiVersion: rcalab.dev/v1alpha1
-kind: FailureScenario
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
 metadata:
   name: sc-01
   namespace: default

@@ -23,7 +23,7 @@ const (
 	// KnownGoodAnnotationPrefix marks a mutated Deployment with its rollback
 	// image (suffix = container name). It survives even a force-deleted
 	// scenario, so the sweeper and humans can always find the way back.
-	KnownGoodAnnotationPrefix = "rcalab.dev/known-good."
+	KnownGoodAnnotationPrefix = "maintenance.platform.dev/known-good."
 
 	defaultRolloutTimeout = 5 * time.Minute
 )

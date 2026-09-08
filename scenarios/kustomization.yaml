@@ -25,3 +25,4 @@ resources:
   - reliability/pg-checkpointer.yaml
   - reliability/mysql-galera-quorum-loss.yaml
   - reliability/mysql-galera-cert-conflicts.yaml
+  - reliability/pg-xid-wraparound.yaml

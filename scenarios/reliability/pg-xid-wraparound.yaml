@@ -1,0 +1,183 @@
+# Vacuum freezing is blocked while transaction IDs are consumed fast, so
+# age(datfrozenxid) climbs without bound toward the wraparound limit.
+#
+# Two things have to be true at once, and that is the whole point of the
+# scenario. A held xmin horizon on its own (see sc-25) stalls freezing but the
+# age barely moves, because normal traffic burns only a few hundred XIDs per
+# second. Burning XIDs on its own does nothing either: at
+# autovacuum_freeze_max_age Postgres forces anti-wraparound autovacuums, they
+# succeed, and the age drops straight back. Only the combination escapes, and
+# the escape is silent: nothing is slow, nothing errors, no user notices, and
+# the database is quietly spending a budget that ends in a forced shutdown.
+#
+# Sizing, measured on this cluster (see also the note on cost below):
+#   XID consumption is commit-throughput bound and does NOT scale with
+#   concurrency: in isolation, 1 worker 31k/s, 2 workers 35k/s, 4 workers
+#   34k/s. Hence concurrency 2 in action a3. Two subtransaction-based tricks
+#   were tried and are both worse: pg_current_xact_id() in a subtransaction
+#   returns the top-level XID and assigns nothing, and forcing assignment with
+#   a write to an UNLOGGED table collapses to 849 XIDs/sec once the subxid
+#   cache overflows.
+#
+#   With the scenario actually running (holder pinned, application traffic
+#   continuing) the observed rate is ~26.5k/s, and because freezing is blocked
+#   the age grows 1:1 with it. Reaching TARGET_AGE below takes roughly:
+#     from a fresh cluster (age ~12M)      ~137 min
+#     from a previous run (age settles     ~113 min
+#     around vacuum_freeze_min_age, 50M)
+#   The duration below allows for the slower case plus time to hold the state.
+#
+# TARGET_AGE (the second argument to sc27_burn_xids in action a3) is the knob.
+# It is set to 230,000,000, which is 10.7% of the 2^31 wraparound limit, just
+# past Postgres's own escalation point of autovacuum_freeze_max_age (200M).
+# Coroot's "Postgres transaction ID wraparound" check reports age as a
+# percentage of 2^31 and ships with a 50% threshold, so this project's
+# threshold must be set to 10% for the check to fire. Reaching the shipped 50%
+# default would mean 1.07 billion XIDs: roughly 9 hours and ~57 GB of archived
+# WAL, which does not fit the backup repo. Halving TARGET_AGE to 115,000,000
+# (5.4%, an earlier-warning threshold) roughly halves the runtime.
+#
+# Cost: the burn writes ~53 bytes of WAL per XID, so reaching 230M generates
+# ~12 GB of archived WAL. The pgbackrest repo had ~28 GB free when this was
+# written. Do not run this back to back without letting pgbackrest expire.
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
+metadata:
+  name: sc-27
+  namespace: default
+spec:
+  displayName: Transaction ID wraparound risk (freezing blocked)
+  description: >-
+    A "reporting" session opens a REPEATABLE READ transaction, takes its
+    snapshot and stalls, pinning the global xmin horizon so vacuum can no longer
+    advance datfrozenxid. At the same time a runaway batch job commits a
+    transaction per row without doing any useful work, consuming ~26k
+    transaction IDs per second. Because freezing is blocked, every one of those
+    IDs is permanent progress toward wraparound: age(datfrozenxid) climbs
+    steadily and never falls back. Past autovacuum_freeze_max_age Postgres
+    starts forcing anti-wraparound autovacuums on every table; they run, they
+    report success, and they still cannot advance the horizon, which is the
+    detail that makes this so easy to misread. Nothing is slow and no user is
+    affected, so the only signal is the age itself. Reverting terminates the
+    stalled session; the horizon advances, the next vacuum freezes, and the age
+    collapses back to roughly vacuum_freeze_min_age.
+  category: reliability
+  icon: postgres
+  duration: 180m
+  expectedSymptoms:
+    - age(datfrozenxid) climbs steadily by roughly 1.5M per minute and never falls back, while data volume, query rate and latency are all unchanged
+    - the xmin horizon breakdown attributes the hold to a running transaction (not a replication slot, standby feedback or prepared transaction), with a backend_xmin age tracking the xid age
+    - autovacuum runs and reports success, yet datfrozenxid does not advance, because vacuum cannot freeze anything newer than the pinned snapshot
+    - past autovacuum_freeze_max_age (200M here) Postgres escalates to forced anti-wraparound autovacuums on every table; they complete and still change nothing
+    - commit rate is ~26k transactions/sec from a single client doing no useful work, with WAL generation up accordingly, while rows read/written stay flat
+    - "no user-visible symptom at all, no latency change, no errors, no lock contention. That absence is the point: the only tell is the age, and the clock is running toward a forced database shutdown"
+    - terminating the stalled session (revert) lets the next vacuum advance datfrozenxid, and the age drops to about vacuum_freeze_min_age (50M) within a few minutes
+  actions:
+    # 1. The XID burner, as a stored procedure so the loop runs entirely
+    #    server-side: one CALL burns for a minute with no client round trips.
+    #    Transaction control inside a procedure needs the CALL to be the only
+    #    statement in the request, which is how dbtool issues it.
+    #    The target-age check makes the burn self-limiting: once the age is
+    #    reached the procedure returns immediately, so the scenario holds the
+    #    state for the rest of its duration without generating more WAL. The
+    #    modulo keeps that catalog lookup off the hot path.
+    #    synchronous_commit is set per-session, not globally, so the burner's
+    #    commits skip the fsync wait while application writes are unaffected.
+    #    NOTE the $proc$ dollar-quote tag. Queries reach dbtool as container
+    #    args, and Kubernetes rewrites "$$" to a literal "$" there, so a plain
+    #    $$-quoted body arrives at Postgres broken ("syntax error at or near
+    #    $"). A named tag has no adjacent dollars and survives untouched.
+    - name: a1
+      type: DBExec
+      dbExec:
+        name: sc-27-setup
+        engine: postgres
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        ensure:
+          - >-
+            CREATE OR REPLACE PROCEDURE sc27_burn_xids(target_age bigint, max_secs int)
+            LANGUAGE plpgsql AS $proc$
+            DECLARE t0 timestamptz := clock_timestamp(); i bigint := 0;
+            BEGIN
+            PERFORM set_config('synchronous_commit','off',false);
+            WHILE clock_timestamp() - t0 < make_interval(secs => max_secs) LOOP
+            IF i % 100000 = 0 AND (SELECT max(age(datfrozenxid)) FROM pg_database) >= target_age THEN
+            RETURN;
+            END IF;
+            PERFORM pg_current_xact_id();
+            COMMIT;
+            i := i + 1;
+            END LOOP;
+            END $proc$;
+        revert:
+          - "DROP PROCEDURE IF EXISTS sc27_burn_xids(bigint, int)"
+
+    # 2. The holder. REPEATABLE READ takes its snapshot at the first query and
+    #    keeps it, which is what pins the horizon. pg_sleep outlasts the run
+    #    (11400s > the 180m duration) so the transaction never ends on its own
+    #    and the snapshot is never refreshed. If it were, datfrozenxid would
+    #    start advancing again and the age would collapse mid-run. A sleeping
+    #    backend does no socket IO and so will not notice its client pod dying,
+    #    which is why action 4 terminates it explicitly.
+    - name: a2
+      type: Workload
+      workload:
+        name: sc-27-w1
+        engine: postgres
+        concurrency: 1
+        interval: 10s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "SET application_name = 'sc-27-holder'; BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT count(*) FROM products; SELECT pg_sleep(11400);"
+
+    # 3. The runaway batch job. Delayed so the horizon is pinned before the
+    #    first XID is spent, otherwise early progress is simply frozen away.
+    #    concurrency is 2 because that is the measured ceiling: this is bound by
+    #    commit throughput, and more workers do not go faster.
+    - name: a3
+      type: Workload
+      delay: 20s
+      workload:
+        name: sc-27-w2
+        engine: postgres
+        concurrency: 2
+        interval: 1s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "CALL sc27_burn_xids(230000000::bigint, 60)"
+
+    # 4. Deterministic release. Mutates nothing on activation (the ensure is a
+    #    no-op probe); its whole purpose is the revert. Reverts run LIFO, so
+    #    this one goes first and releases the horizon before the burner and
+    #    holder Jobs are torn down. Idempotent: matches zero rows if the holder
+    #    is already gone.
+    - name: a4
+      type: DBExec
+      dbExec:
+        name: sc-27-w3
+        engine: postgres
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        ensure:
+          - "SELECT 1"
+        revert:
+          - "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'sc-27-holder' AND pid <> pg_backend_pid()"

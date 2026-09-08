@@ -2,6 +2,8 @@ package actions
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -29,7 +31,35 @@ const (
 	execJobDeadline = 20 * time.Minute
 	// execRevertSuffix names the revert Job relative to the action name.
 	execRevertSuffix = "-cleanup"
+	// execRunSuffixLen is the length of the hex run discriminator in exec Job
+	// names. See execJobNames.
+	execRunSuffixLen = 8
 )
+
+// execJobNames returns the run-scoped Job names for a DBExec action.
+//
+// The run discriminator is what makes these Jobs correct across runs, and it
+// is not cosmetic. runJob treats any succeeded Job with the target name as
+// "already done", and finished Jobs linger for TTLSecondsAfterFinished (600s).
+// With fixed names, a second run started inside that window silently adopted
+// the previous run's Jobs: an ensure that injected nothing while reporting
+// Active, or a revert that ran no statements and left the injected change in
+// place while reporting Completed. Scoping the names to the run means a stale
+// Job can never be mistaken for this run's.
+//
+// Names are computed in Plan, where the run ID is always set, and persisted in
+// the token, so Revert keeps working from the token alone even on the revert
+// path that has no current run (and in-flight runs upgrade safely, reverting
+// with the names their own token recorded).
+func execJobNames(base, runID string) (ensure, revert string) {
+	const maxBase = 63 - 1 - execRunSuffixLen - len(execRevertSuffix)
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	sum := sha256.Sum256([]byte(runID))
+	ensure = sanitizeDNS1123(base + "-" + hex.EncodeToString(sum[:])[:execRunSuffixLen])
+	return ensure, ensure + execRevertSuffix
+}
 
 // DBExecToken is the self-contained revert token of a DBExec action. It carries
 // everything Revert needs — the revert statements never come from the spec.
@@ -53,8 +83,7 @@ func (d *DBExec) Plan(ctx context.Context, c client.Client, rc RunContext, spec 
 	if da == nil {
 		return nil, fmt.Errorf("action %q: dbExec config missing", spec.Name)
 	}
-	ensureName := da.Name
-	revertName := da.Name + execRevertSuffix
+	ensureName, revertName := execJobNames(da.Name, rc.RunID)
 	// Refuse to adopt a same-named Job that belongs to something else.
 	for _, name := range []string{ensureName, revertName} {
 		existing := &batchv1.Job{}

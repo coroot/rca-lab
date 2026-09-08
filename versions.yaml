@@ -15,7 +15,7 @@ services:
   fulfillment-service: 1.0.3   # MySQL has no CREATE INDEX IF NOT EXISTS (crashloop on 1.0.2)
   load-generator: 1.1.0         # per-service RPS override (RPS_OVERRIDES)
   data-seeder: 1.0.7          # seed products before inventory; fail loudly; reserve order-id range
-  operator: 1.6.0             # CRD renamed to MaintenanceJob (maintenance.platform.dev)
+  operator: 1.7.0             # DBExec job names scoped to the run (stale-job adoption bug)
 
 # Third-party pins (operators installed by scripts/deploy.sh via helm).
 charts:

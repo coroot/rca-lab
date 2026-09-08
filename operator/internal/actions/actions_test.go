@@ -261,8 +261,12 @@ func TestDBExecEnsureRevert(t *testing.T) {
 	if err := json.Unmarshal(raw, &tok); err != nil {
 		t.Fatalf("token does not round-trip: %v", err)
 	}
-	if tok.EnsureName != "disable-autovacuum" || tok.RevertName != "disable-autovacuum-cleanup" || len(tok.Revert) != 2 {
+	wantEnsure, wantRevert := execJobNames("disable-autovacuum", rc.RunID)
+	if tok.EnsureName != wantEnsure || tok.RevertName != wantRevert || len(tok.Revert) != 2 {
 		t.Fatalf("token = %+v", tok)
+	}
+	if tok.EnsureName == "disable-autovacuum" {
+		t.Fatalf("job names must be scoped to the run, got %q", tok.EnsureName)
 	}
 
 	// First Ensure creates the Job and is not yet done.
@@ -271,7 +275,7 @@ func TestDBExecEnsureRevert(t *testing.T) {
 		t.Fatalf("Ensure #1: done=%v ra=%v err=%v", done, ra, err)
 	}
 	job := &batchv1.Job{}
-	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "disable-autovacuum"}, job); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: tok.EnsureName}, job); err != nil {
 		t.Fatalf("ensure job not created: %v", err)
 	}
 	args := job.Spec.Template.Spec.Containers[0].Args
@@ -280,7 +284,7 @@ func TestDBExecEnsureRevert(t *testing.T) {
 	}
 
 	// Not done until the Job succeeds.
-	markJobSucceeded(t, ctx, c, "disable-autovacuum")
+	markJobSucceeded(t, ctx, c, tok.EnsureName)
 	done, _, err = d.Ensure(ctx, c, rc, spec, raw)
 	if err != nil || !done {
 		t.Fatalf("Ensure #2: done=%v err=%v", done, err)
@@ -291,10 +295,103 @@ func TestDBExecEnsureRevert(t *testing.T) {
 	if err != nil || done {
 		t.Fatalf("Revert #1: done=%v err=%v", done, err)
 	}
-	markJobSucceeded(t, ctx, c, "disable-autovacuum-cleanup")
+	markJobSucceeded(t, ctx, c, tok.RevertName)
 	done, _, err = d.Revert(ctx, c, rc, raw)
 	if err != nil || !done {
 		t.Fatalf("Revert #2: done=%v err=%v", done, err)
+	}
+}
+
+// TestDBExecRerunIgnoresPreviousRunJobs is a regression test.
+//
+// Finished exec Jobs linger for TTLSecondsAfterFinished (600s), and runJob
+// reports done for any succeeded Job with the target name. When names were
+// fixed rather than run-scoped, a run started inside that window adopted the
+// previous run's Jobs and executed no SQL at all: an ensure that injected
+// nothing while reporting Active, or a revert that left the injected change in
+// place while reporting Completed.
+func TestDBExecRerunIgnoresPreviousRunJobs(t *testing.T) {
+	ctx := context.Background()
+	spec := &v1alpha1.Action{
+		Name: "drop-index",
+		Type: v1alpha1.ActionTypeDBExec,
+		DBExec: &v1alpha1.DBExecAction{
+			Name:   "drop-index",
+			Engine: "mysql",
+			Ensure: []string{"ALTER TABLE orders DROP KEY idx"},
+			Revert: []string{"ALTER TABLE orders ADD KEY idx (user_id)"},
+		},
+	}
+	d := &DBExec{}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&batchv1.Job{}).Build()
+
+	// Run 1: drive ensure and revert both to completion. Their Jobs stay in
+	// the cluster afterwards, exactly as the TTL leaves them.
+	rc1 := testRC()
+	rc1.RunID = "run-1"
+	raw1, err := d.Plan(ctx, c, rc1, spec)
+	if err != nil {
+		t.Fatalf("Plan run 1: %v", err)
+	}
+	var tok1 DBExecToken
+	if err := json.Unmarshal(raw1, &tok1); err != nil {
+		t.Fatalf("token 1: %v", err)
+	}
+	if _, _, err := d.Ensure(ctx, c, rc1, spec, raw1); err != nil {
+		t.Fatalf("Ensure run 1: %v", err)
+	}
+	markJobSucceeded(t, ctx, c, tok1.EnsureName)
+	if _, _, err := d.Revert(ctx, c, rc1, raw1); err != nil {
+		t.Fatalf("Revert run 1: %v", err)
+	}
+	markJobSucceeded(t, ctx, c, tok1.RevertName)
+	if done, _, err := d.Revert(ctx, c, rc1, raw1); err != nil || !done {
+		t.Fatalf("Revert run 1 completion: done=%v err=%v", done, err)
+	}
+
+	// Run 2 starts while both of run 1's Jobs are still present.
+	rc2 := testRC()
+	rc2.RunID = "run-2"
+	raw2, err := d.Plan(ctx, c, rc2, spec)
+	if err != nil {
+		t.Fatalf("Plan run 2: %v", err)
+	}
+	var tok2 DBExecToken
+	if err := json.Unmarshal(raw2, &tok2); err != nil {
+		t.Fatalf("token 2: %v", err)
+	}
+	if tok2.EnsureName == tok1.EnsureName || tok2.RevertName == tok1.RevertName {
+		t.Fatalf("run 2 reuses run 1 job names: %q / %q", tok2.EnsureName, tok2.RevertName)
+	}
+
+	// Ensure must actually run: not done on the first pass, and a new Job.
+	done, _, err := d.Ensure(ctx, c, rc2, spec, raw2)
+	if err != nil {
+		t.Fatalf("Ensure run 2: %v", err)
+	}
+	if done {
+		t.Fatal("run 2 ensure adopted run 1's Job: the statements would never run")
+	}
+	job := &batchv1.Job{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: tok2.EnsureName}, job); err != nil {
+		t.Fatalf("run 2 ensure job not created: %v", err)
+	}
+	markJobSucceeded(t, ctx, c, tok2.EnsureName)
+	if done, _, err = d.Ensure(ctx, c, rc2, spec, raw2); err != nil || !done {
+		t.Fatalf("Ensure run 2 completion: done=%v err=%v", done, err)
+	}
+
+	// Revert must actually run too. This is the damaging direction: adopting
+	// run 1's cleanup Job leaves the index dropped while reporting success.
+	done, _, err = d.Revert(ctx, c, rc2, raw2)
+	if err != nil {
+		t.Fatalf("Revert run 2: %v", err)
+	}
+	if done {
+		t.Fatal("run 2 revert adopted run 1's cleanup Job: the injected change would be left in place")
+	}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: tok2.RevertName}, job); err != nil {
+		t.Fatalf("run 2 revert job not created: %v", err)
 	}
 }
 

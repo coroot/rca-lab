@@ -20,7 +20,19 @@
 # last checkpoint sits at 72 to 102s. So the only thing a scenario has to do is
 # stop checkpointing, and the check fires about 15 minutes later.
 #
-# Why partition from the primary specifically, rather than from everything:
+# Streaming is not the only way WAL reaches the standby, and cutting it alone
+# does nothing. The standby's restore_command is
+#
+#   pgbackrest --stanza=db archive-get %f "%p"
+#
+# so when streaming breaks it simply falls back to pulling archived segments
+# from the pgBackRest repo host and keeps replaying. Measured with only the
+# primary partitioned: the WAL receiver was DISCONNECTED and the primary saw
+# zero standbys, yet restartpoints_done still advanced 617 -> 620 in 90 seconds
+# and the checkpoint clock never rose above ~40s. Both paths have to be cut,
+# which is why there are two partitions below.
+#
+# Why partition from those two specifically, rather than from everything:
 #   - the cluster-agent must still reach the standby, or it stops reporting and
 #     the incident looks like an outage instead of a stalled checkpointer
 #   - Patroni uses the Kubernetes API as its DCS, so leaving that path intact
@@ -34,8 +46,11 @@ metadata:
 spec:
   displayName: Checkpoints stalled on a fenced standby
   description: >-
-    Chaos Mesh partitions the current standby from the primary, selected by role
-    so it follows failovers. The WAL receiver disconnects, no new WAL arrives,
+    Chaos Mesh partitions the current standby from both of its sources of WAL,
+    the primary and the pgBackRest repo host, selected by label so they follow
+    failovers. Cutting streaming alone is not enough: the standby's
+    restore_command falls back to archive-get and it keeps replaying. With both
+    paths cut the WAL receiver disconnects, no new WAL arrives by either route,
     replay stops, and the standby stops issuing restartpoints. Time since its
     last checkpoint grows past three times checkpoint_timeout while the WAL it
     already holds stays unreplayed, which is the state that turns a routine
@@ -85,11 +100,38 @@ spec:
                 postgres-operator.crunchydata.com/cluster: pg
                 postgres-operator.crunchydata.com/role: primary
 
-    # 2. Keep the primary writing so the replication lag grows visibly for as
+    # 2. Cut the archive path as well. Without this the standby just falls back
+    #    to archive-get and keeps replaying, so the checkpoint clock never
+    #    climbs and the scenario does nothing. The repo host is selected by
+    #    data=pgbackrest; a separate NetworkChaos rather than one wider target
+    #    because a single Chaos Mesh selector cannot express "the primary OR the
+    #    repo host" without also matching the standby itself.
+    - name: a2
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: partition
+          mode: all
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              postgres-operator.crunchydata.com/cluster: pg
+              postgres-operator.crunchydata.com/role: replica
+          direction: both
+          target:
+            mode: all
+            selector:
+              namespaces: [default]
+              labelSelectors:
+                postgres-operator.crunchydata.com/cluster: pg
+                postgres-operator.crunchydata.com/data: pgbackrest
+
+    # 3. Keep the primary writing so the replication lag grows visibly for as
     #    long as the partition holds, rather than flatlining at whatever it was
     #    when the standby was cut off. A no-op rewrite of its own values, so it
     #    adds no rows and needs no revert; deleting the Job stops it.
-    - name: a2
+    - name: a3
       type: Workload
       delay: 20s
       workload:

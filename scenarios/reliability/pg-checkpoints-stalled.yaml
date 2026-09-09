@@ -1,0 +1,107 @@
+# The standby is cut off from the primary, so WAL stops arriving, replay stops,
+# and with it the standby's restartpoints. Time since the last checkpoint climbs
+# without bound while the WAL already received but not yet checkpointed stays on
+# disk, so a crash of that standby would have to replay all of it.
+#
+# The tell is that the standby is still up and still answering queries. Nothing
+# is down, nothing errors, and the data it serves is simply frozen at the moment
+# it was cut off. Only the checkpoint clock and the replication lag give it away.
+#
+# Note this is deliberately NOT sc-21. That scenario drives checkpoints to fire
+# MORE often (requested by max_wal_size rather than the timer), which pushes time
+# since last checkpoint down and can never trip the checkpoint check. This one
+# produces the opposite condition, which is what the check actually looks for:
+#
+#   time since last checkpoint > 3 x checkpoint_timeout   (900s here)
+#   AND WAL since last checkpoint > 16 MB                 (one segment)
+#
+# Measured on this cluster before writing it: the WAL half is already satisfied
+# by ordinary application load (98 to 182 MB between checkpoints), and time since
+# last checkpoint sits at 72 to 102s. So the only thing a scenario has to do is
+# stop checkpointing, and the check fires about 15 minutes later.
+#
+# Why partition from the primary specifically, rather than from everything:
+#   - the cluster-agent must still reach the standby, or it stops reporting and
+#     the incident looks like an outage instead of a stalled checkpointer
+#   - Patroni uses the Kubernetes API as its DCS, so leaving that path intact
+#     means the standby still sees the leader lock and will not try to promote
+#     itself. Fencing it from everything would risk a split brain instead.
+apiVersion: maintenance.platform.dev/v1alpha1
+kind: MaintenanceJob
+metadata:
+  name: sc-28
+  namespace: default
+spec:
+  displayName: Checkpoints stalled on a fenced standby
+  description: >-
+    Chaos Mesh partitions the current standby from the primary, selected by role
+    so it follows failovers. The WAL receiver disconnects, no new WAL arrives,
+    replay stops, and the standby stops issuing restartpoints. Time since its
+    last checkpoint grows past three times checkpoint_timeout while the WAL it
+    already holds stays unreplayed, which is the state that turns a routine
+    restart of that node into a long crash recovery. The standby stays up and
+    keeps answering queries the whole time, serving data frozen at the moment it
+    was cut off, so nothing looks broken from the application's side. Reverting
+    deletes the NetworkChaos; the receiver reconnects, replay catches up, and the
+    next restartpoint resets the clock.
+  category: reliability
+  icon: postgres
+  duration: 35m
+  expectedSymptoms:
+    - time since the last checkpoint on the standby climbs without bound, past the 3x checkpoint_timeout threshold (900s here), while the primary keeps checkpointing normally
+    - WAL received but not yet checkpointed stays on the standby, so a restart of that node would face a long crash recovery
+    - the WAL receiver is disconnected and replication lag grows continuously, in both bytes and seconds, for as long as the partition holds
+    - "the standby is up the whole time: pg_up is 1, it accepts connections and answers queries, but every answer is frozen at the moment it was cut off"
+    - the primary is completely unaffected, so anything watching only the primary sees a healthy cluster
+    - no promotion or failover happens, because the standby can still reach the Kubernetes API and sees the leader lock still held
+    - reverting reconnects the receiver, replay catches up, and the next restartpoint resets the checkpoint clock. Expect roughly 90 seconds before the receiver is back in "streaming", which is the WAL receiver retry interval plus Patroni's loop, not a failed revert
+  actions:
+    # 1. Partition the current standby from the primary. Selected by role so it
+    #    follows failovers, matching sc-22. Chaos Mesh's own duration is set by
+    #    the operator as a dead-man switch, so the fault self-heals if the
+    #    operator dies mid-run.
+    #
+    #    direction "both" with an explicit target is required here: the netem
+    #    webhook rejects "both" without one, and a one-way cut would leave the
+    #    primary's WAL sender half-connected rather than cleanly disconnected.
+    - name: a1
+      type: ChaosMesh
+      chaosMesh:
+        kind: NetworkChaos
+        spec:
+          action: partition
+          mode: all
+          selector:
+            namespaces: [default]
+            labelSelectors:
+              postgres-operator.crunchydata.com/cluster: pg
+              postgres-operator.crunchydata.com/role: replica
+          direction: both
+          target:
+            mode: all
+            selector:
+              namespaces: [default]
+              labelSelectors:
+                postgres-operator.crunchydata.com/cluster: pg
+                postgres-operator.crunchydata.com/role: primary
+
+    # 2. Keep the primary writing so the replication lag grows visibly for as
+    #    long as the partition holds, rather than flatlining at whatever it was
+    #    when the standby was cut off. A no-op rewrite of its own values, so it
+    #    adds no rows and needs no revert; deleting the Job stops it.
+    - name: a2
+      type: Workload
+      delay: 20s
+      workload:
+        name: sc-28-w1
+        engine: postgres
+        concurrency: 1
+        interval: 2s
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: pg-pguser-products
+                key: uri
+        queries:
+          - "UPDATE products SET name = name WHERE id BETWEEN 1 AND 20000"

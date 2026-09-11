@@ -241,15 +241,34 @@ func getCart() error {
 	return doGet(fmt.Sprintf("%s/api/cart/%s", gatewayURL, randomUserID()))
 }
 
+// cartCheckoutAt is the size at which the simulated user checks out instead of
+// piling on more items. Well under cart-service's MAX_CART_ITEMS (100), so a
+// cart can never reach the cap and adds never fail with 400 "cart is full".
+// Checking here rather than relying on the periodic checkout scenario matters
+// for carts that are ALREADY full: they are drained the first time anything
+// adds to them, instead of waiting for checkout to pick that one user out of
+// ~10k.
+const cartCheckoutAt = 20
+
 func addToCart() error {
 	uid := randomUserID()
+	ids, err := cartItems(uid)
+	if err != nil {
+		return err
+	}
+	if len(ids) >= cartCheckoutAt {
+		if _, err := doPost(fmt.Sprintf("%s/api/cart/%s/checkout", gatewayURL, uid),
+			map[string]interface{}{"shipping_address": "1 Test Street"}); err != nil {
+			return err
+		}
+	}
 	item := map[string]interface{}{
 		"product_id": fmt.Sprintf("%d", rand.Intn(500000)+1),
 		"quantity":   rand.Intn(5) + 1,
 		"price":      float64(rand.Intn(10000)) / 100.0,
 		"name":       fmt.Sprintf("Product %d", rand.Intn(500000)),
 	}
-	_, err := doPost(fmt.Sprintf("%s/api/cart/%s/items", gatewayURL, uid), item)
+	_, err = doPost(fmt.Sprintf("%s/api/cart/%s/items", gatewayURL, uid), item)
 	return err
 }
 

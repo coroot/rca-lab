@@ -17,3 +17,8 @@ data:
   OTEL_TRACES_SAMPLER: "parentbased_always_on"
   OTEL_METRIC_EXPORT_INTERVAL: "15000"
   OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
+  # Node's auto-instrumentation traces every DNS lookup and TCP connect. Those
+  # happen during connection-pool setup and background reconnects, outside any
+  # request, so they arrive as parentless root spans and clutter the trace list
+  # with things no user asked for. Ignored by the non-Node SDKs.
+  OTEL_NODE_DISABLED_INSTRUMENTATIONS: "dns,net"

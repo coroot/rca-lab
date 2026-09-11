@@ -5,3 +5,5 @@ grpcio==1.66.2
 protobuf==5.28.2
 opentelemetry-distro==0.50b0
 opentelemetry-exporter-otlp==1.29.0
+# imported directly in app.py for the grpc.aio client interceptors
+opentelemetry-instrumentation-grpc==0.50b0

@@ -4,7 +4,7 @@
 # services/<svc>/variants/<name>/variant.yaml.
 
 services:
-  api-gateway: 1.0.0
+  api-gateway: 1.1.0            # propagate trace context on the grpc.aio recommendation call
   product-catalog: 1.0.0
   cart-service: 1.0.1          # cluster-aware Valkey client
   order-service: 1.0.1          # glibc JRE base (snappy-java native lib needs glibc)

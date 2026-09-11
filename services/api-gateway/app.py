@@ -4,6 +4,7 @@ import os
 import time
 
 import grpc
+from opentelemetry.instrumentation.grpc import aio_client_interceptors
 import httpx
 from fastapi import FastAPI, Request, Response
 
@@ -56,7 +57,15 @@ async def startup():
     for name, url in DOWNSTREAM_SERVICES.items():
         upstream_clients[url] = _make_client()
     global recommendation_channel, recommendation_stub
-    recommendation_channel = grpc.aio.insecure_channel(RECOMMENDATION_SERVICE_ADDR)
+    # Attach the OTel aio interceptors explicitly rather than relying on
+    # opentelemetry-instrument's patch of grpc.aio.insecure_channel. Without
+    # them no traceparent is sent, and recommendation-service starts a fresh
+    # root trace for every call through this path, so half the recommendation
+    # traffic showed up in Coroot as disconnected root spans.
+    recommendation_channel = grpc.aio.insecure_channel(
+        RECOMMENDATION_SERVICE_ADDR,
+        interceptors=aio_client_interceptors(),
+    )
     recommendation_stub = recommendation_pb2_grpc.RecommendationServiceStub(recommendation_channel)
 
 

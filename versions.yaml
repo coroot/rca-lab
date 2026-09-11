@@ -13,7 +13,7 @@ services:
   inventory-service: 1.0.3     # perf: persistent conns, opcache tuning, optimized autoloader
   recommendation-service: 1.0.0
   fulfillment-service: 1.0.3   # MySQL has no CREATE INDEX IF NOT EXISTS (crashloop on 1.0.2)
-  load-generator: 1.3.0         # check out a full cart on the next add, so 400 "cart is full" cannot occur
+  load-generator: 1.4.0         # use real order ids; carts checked out before the cap
   data-seeder: 1.0.7          # seed products before inventory; fail loudly; reserve order-id range
   operator: 1.7.0             # DBExec job names scoped to the run (stale-job adoption bug)
 

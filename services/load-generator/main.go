@@ -312,8 +312,39 @@ func listOrders() error {
 	return doGet(fmt.Sprintf("%s/api/orders?page=%d&size=20", gatewayURL, page))
 }
 
+// existingOrderID returns an order id that actually exists, by reading a page
+// of the order list the way a user would before opening one.
+//
+// Picking rand.Intn(100000) instead meant near-certain 404s: ids are
+// auto-increment and already past 6.4 million, so the guessed range stopped
+// overlapping reality long ago. That was most of the PUT error rate.
+func existingOrderID() (int64, error) {
+	body, err := doGetBody(fmt.Sprintf("%s/api/orders?page=%d&size=20", gatewayURL, rand.Intn(5)+1))
+	if err != nil {
+		return 0, err
+	}
+	var page struct {
+		Content []struct {
+			ID int64 `json:"id"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return 0, err
+	}
+	if len(page.Content) == 0 {
+		return 0, nil
+	}
+	return page.Content[rand.Intn(len(page.Content))].ID, nil
+}
+
 func getOrder() error {
-	id := rand.Intn(100000) + 1
+	id, err := existingOrderID()
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return nil
+	}
 	return doGet(fmt.Sprintf("%s/api/orders/%d", gatewayURL, id))
 }
 
@@ -382,7 +413,13 @@ func getUserOrders() error {
 }
 
 func updateOrderStatus() error {
-	id := rand.Intn(100000) + 1
+	id, err := existingOrderID()
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return nil
+	}
 	statuses := []string{"CONFIRMED", "SHIPPED", "DELIVERED"}
 	status := map[string]string{"status": statuses[rand.Intn(len(statuses))]}
 	return doPut(fmt.Sprintf("%s/api/orders/%d/status", gatewayURL, id), status)

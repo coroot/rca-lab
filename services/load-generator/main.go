@@ -125,6 +125,44 @@ func doGet(url string) error {
 	return nil
 }
 
+// doGetBody is doGet that keeps the body, for the cart flows that have to act
+// on what is actually in the cart rather than on a guess.
+func doGetBody(url string) ([]byte, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return body, nil
+}
+
+// cartItems returns the product ids currently in a user's cart.
+func cartItems(uid string) ([]string, error) {
+	body, err := doGetBody(fmt.Sprintf("%s/api/cart/%s", gatewayURL, uid))
+	if err != nil {
+		return nil, err
+	}
+	var cart struct {
+		Items []struct {
+			ProductID string `json:"product_id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &cart); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(cart.Items))
+	for _, it := range cart.Items {
+		if it.ProductID != "" {
+			ids = append(ids, it.ProductID)
+		}
+	}
+	return ids, nil
+}
+
 var bufPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
@@ -215,10 +253,38 @@ func addToCart() error {
 	return err
 }
 
+// removeFromCart deletes an item the cart actually holds. Picking a random
+// product id instead means the cart almost never contains it (1 in 500k), so
+// cart-service answers 404 "item not found" and the removal never happens:
+// the endpoint looked busy while carts only ever grew.
 func removeFromCart() error {
 	uid := randomUserID()
-	pid := rand.Intn(500000) + 1
-	return doDelete(fmt.Sprintf("%s/api/cart/%s/items/%d", gatewayURL, uid, pid))
+	ids, err := cartItems(uid)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil // nothing to remove; a request here would just 404
+	}
+	return doDelete(fmt.Sprintf("%s/api/cart/%s/items/%s", gatewayURL, uid, ids[rand.Intn(len(ids))]))
+}
+
+// checkoutCart empties a cart the way a real user would, which is what keeps
+// cart size bounded. Without it carts only grow, and once one reaches
+// MAX_CART_ITEMS (100) every later add fails with 400 "cart is full" forever.
+// Guarded on a non-empty cart because checkout answers 400 "cart is empty".
+func checkoutCart() error {
+	uid := randomUserID()
+	ids, err := cartItems(uid)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err = doPost(fmt.Sprintf("%s/api/cart/%s/checkout", gatewayURL, uid),
+		map[string]interface{}{"shipping_address": "1 Test Street"})
+	return err
 }
 
 // Order scenarios
@@ -419,7 +485,8 @@ func allServices() []serviceScenarios {
 			scenarios: []scenario{
 				{"get-cart", 30, getCart},
 				{"add-to-cart", 40, addToCart},
-				{"remove-from-cart", 30, removeFromCart},
+				{"remove-from-cart", 20, removeFromCart},
+				{"checkout", 10, checkoutCart},
 			},
 		},
 		{

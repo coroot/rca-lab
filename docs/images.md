@@ -21,7 +21,9 @@ mutable-tag surprises.
    feature). This is the step that makes the change deployable — it is how the
    deploy learns there is something new to roll out.
 3. Commit and push. CI (`.github/workflows/build.yml`) rebuilds the changed
-   service and pushes `:<new-tag>` (plus `:sha-<commit>` and `:latest`).
+   service and pushes `:<new-tag>` (plus `:sha-<commit>` and `:latest`). Images
+   are multi-arch (linux/amd64 and linux/arm64): each arch is built on a
+   native runner, then merged into one manifest per tag.
 4. `make deploy` resolves each service's tag from `versions.yaml` and applies
    it. Only the service whose tag changed is rolled out; untouched services
    keep their tag and are left running.

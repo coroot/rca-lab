@@ -25,35 +25,42 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.variants.outputs.matrix }}
+      images: ${{ steps.variants.outputs.images }}
     steps:
       - uses: actions/checkout@v4
       - id: variants
         run: |
-          matrix=$(python3 - "${{ inputs.service }}" <<'EOF'
+          python3 - "${{ inputs.service }}" >> "$GITHUB_OUTPUT" <<'EOF'
           import glob, json, os, sys, yaml
           only = sys.argv[1] if len(sys.argv) > 1 else ""
-          include = []
+          # One build job per variant and architecture, each on a native runner
+          # (no QEMU); the merge job then stitches the per-arch digests into one
+          # multi-arch manifest per variant.
+          runners = {"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}
+          builds, images = [], []
           for f in sorted(glob.glob("services/*/variants/*/variant.yaml")):
               service = f.split("/")[1]
               if only and service != only:
                   continue
               v = yaml.safe_load(open(f))
-              include.append({
-                  "service": service,
-                  "variant": v["name"],
-                  "tag": str(v["tag"]),
-                  "context": os.path.join("services", service),
-              })
-          print(json.dumps({"include": include}))
+              images.append({"service": service, "variant": v["name"], "tag": str(v["tag"])})
+              for arch, runner in runners.items():
+                  builds.append({
+                      "service": service,
+                      "variant": v["name"],
+                      "context": os.path.join("services", service),
+                      "arch": arch,
+                      "runner": runner,
+                  })
+          print("matrix=" + json.dumps({"include": builds}))
+          print("images=" + json.dumps({"include": images}))
+          print("variants:", [i["service"] + ":" + i["tag"] for i in images], file=sys.stderr)
           EOF
-          )
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "variants: $matrix"
 
   build:
     needs: detect
     if: ${{ fromJson(needs.detect.outputs.matrix).include[0] }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
@@ -67,15 +74,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: ${{ matrix.context }}
-          platforms: linux/amd64
-          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          platforms: linux/${{ matrix.arch }}
           build-args: |
             VARIANT=${{ matrix.variant }}
-          tags: ghcr.io/coroot/rca-lab/${{ matrix.service }}:${{ matrix.tag }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.variant }},mode=max
+          # Pushed by digest only (untagged); the merge job tags the manifest.
+          tags: ghcr.io/coroot/rca-lab/${{ matrix.service }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.variant }}-${{ matrix.arch }},mode=max
+      - name: Export digest
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        with:
+          name: digest-${{ matrix.service }}-${{ matrix.variant }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Combine the per-arch images into one multi-arch manifest per variant and tag it.
+  merge:
+    needs: [detect, build]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.images) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-${{ matrix.service }}-${{ matrix.variant }}-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and push the multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          [ "$(ls | wc -l)" -eq 2 ] || { echo "expected one digest per arch, got: $(ls)"; exit 1; }
+          docker buildx imagetools create \
+            -t ghcr.io/coroot/rca-lab/${{ matrix.service }}:${{ matrix.tag }} \
+            $(printf 'ghcr.io/coroot/rca-lab/${{ matrix.service }}@sha256:%s ' *)
+          docker buildx imagetools inspect ghcr.io/coroot/rca-lab/${{ matrix.service }}:${{ matrix.tag }}
 
   registry-check:
     runs-on: ubuntu-latest

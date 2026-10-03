@@ -18,9 +18,14 @@
 #   OTLP_SIGNALS    which signals to forward, comma-separated subset of
 #                   traces,metrics,logs (default: all). Unlisted signals are
 #                   dropped. e.g. Coroot ingests traces via OTLP: OTLP_SIGNALS=traces
+#   EXTERNAL_DBS    comma-separated databases provided from outside the lab
+#                   instead of being installed by it (supported: mysql). The
+#                   external database must satisfy the contract in
+#                   docs/external-databases.md (Service/Secret names).
 #   YES=1           skip the kube-context confirmation prompt
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib.sh
 
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 SINGLE_NODE="${SINGLE_NODE:-}"
@@ -59,6 +64,49 @@ preflight() {
     if [ "$nodes" = 1 ] && [ -z "$SINGLE_NODE" ]; then
         warn "cluster has a single node; HA database sizes will not schedule. Consider: make deploy SINGLE_NODE=1"
     fi
+    local db
+    for db in $(echo "$EXTERNAL_DBS" | tr ',' ' '); do
+        case " $SUPPORTED_EXTERNAL_DBS " in
+            *" $db "*) ;;
+            *) die "EXTERNAL_DBS: '$db' is not supported (supported: $SUPPORTED_EXTERNAL_DBS)" ;;
+        esac
+    done
+    # Switching a database between lab-managed and external on a running lab
+    # is not supported: the lab would either adopt a cluster it did not create
+    # or orphan one it did. Tear down first.
+    local recorded
+    recorded="$(recorded_external_dbs)"
+    if kubectl get configmap rca-lab -n default >/dev/null 2>&1 && [ "$recorded" != "$EXTERNAL_DBS" ]; then
+        die "this lab was deployed with EXTERNAL_DBS='$recorded'; run 'make clean' before changing it to '$EXTERNAL_DBS'"
+    fi
+    if is_external mysql; then
+        check_external_mysql
+    fi
+    kubectl create configmap rca-lab -n default --from-literal=external-dbs="$EXTERNAL_DBS" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
+
+secret_has_keys() {
+    local secret=$1 data key; shift
+    data="$(kubectl get secret "$secret" -n default -o jsonpath='{.data}' 2>/dev/null)" || return 1
+    for key; do
+        echo "$data" | grep -q "\"$key\":" || return 1
+    done
+}
+
+# The external MySQL contract (docs/external-databases.md): the lab talks to
+# MySQL only through these names, all in namespace default.
+check_external_mysql() {
+    info "Checking the external MySQL (EXTERNAL_DBS=mysql) contract"
+    local hint="see docs/external-databases.md"
+    kubectl get service mysql-haproxy -n default >/dev/null 2>&1 \
+        || die "external MySQL: Service mysql-haproxy (writer endpoint) not found in namespace default; $hint"
+    kubectl get service mysql-haproxy-replicas -n default >/dev/null 2>&1 \
+        || die "external MySQL: Service mysql-haproxy-replicas (reader endpoint; may point at the writer) not found in namespace default; $hint"
+    secret_has_keys mysql-custom-user-secret orders payments \
+        || die "external MySQL: Secret mysql-custom-user-secret with keys 'orders' and 'payments' (application user passwords) not found; $hint"
+    secret_has_keys mysql-secrets root \
+        || die "external MySQL: Secret mysql-secrets with key 'root' (creates the databases; runs the retention job) not found; $hint"
 }
 
 # install_operator installs a helm release if it is not already deployed.
@@ -95,7 +143,11 @@ install_operators() {
     helm repo add chaos-mesh https://charts.chaos-mesh.org >/dev/null
     helm repo update percona strimzi valkey chaos-mesh >/dev/null
     install_operator pg-operator percona/pg-operator pg-operator "$PG_OPERATOR_CHART" deploy/operators/pg-operator.values.yaml
-    install_operator pxc-operator percona/pxc-operator pxc-operator "$PXC_OPERATOR_CHART" deploy/operators/pxc-operator.values.yaml
+    if is_external mysql; then
+        info "MySQL is external; not installing pxc-operator"
+    else
+        install_operator pxc-operator percona/pxc-operator pxc-operator "$PXC_OPERATOR_CHART" deploy/operators/pxc-operator.values.yaml
+    fi
     install_operator psmdb-operator percona/psmdb-operator psmdb-operator "$PSMDB_OPERATOR_CHART" deploy/operators/psmdb-operator.values.yaml
     install_operator strimzi strimzi/strimzi-kafka-operator strimzi "$STRIMZI_CHART" deploy/operators/strimzi.values.yaml
     install_operator valkey-operator valkey/valkey-operator valkey-operator "$VALKEY_OPERATOR_CHART" deploy/operators/valkey-operator.values.yaml
@@ -103,7 +155,7 @@ install_operators() {
 }
 
 apply_databases() {
-    info "Applying database and Kafka resources"
+    info "Applying database and Kafka resources${EXTERNAL_DBS:+ (external, not managed here: ${EXTERNAL_DBS})}"
     local base=deploy/overlays/default
     [ -n "$SINGLE_NODE" ] && base=deploy/overlays/single-node
     if [ -n "$STORAGE_CLASS" ]; then
@@ -154,16 +206,20 @@ patches:
         path: /spec/persistence/storageClassName
         value: $STORAGE_CLASS
 EOF
-        kubectl apply -k "$tmp"
-    else
-        kubectl apply -k "$base"
+        base=$tmp
     fi
+    # Rendered then filtered (rather than `apply -k`) so the cluster CRs of
+    # external databases are never applied; the overlays' patches for them
+    # still render, they just target documents that are dropped afterwards.
+    kubectl kustomize "$base" | drop_external_clusters | kubectl apply -f -
 }
 
 wait_databases() {
     info "Waiting for databases (first deploy can take ~10 minutes: image pulls + cluster bootstrap)"
     kubectl wait --for=jsonpath='{.status.state}'=ready perconapgcluster/pg -n default --timeout=15m &
-    kubectl wait --for=jsonpath='{.status.state}'=ready perconaxtradbcluster/mysql -n default --timeout=15m &
+    if ! is_external mysql; then
+        kubectl wait --for=jsonpath='{.status.state}'=ready perconaxtradbcluster/mysql -n default --timeout=15m &
+    fi
     kubectl wait --for=jsonpath='{.status.state}'=ready perconaservermongodb/mongodb -n default --timeout=15m &
     kubectl wait --for=condition=Ready kafka/kafka -n default --timeout=15m &
     kubectl wait --for=jsonpath='{.status.state}'=Ready valkeycluster/valkey -n default --timeout=15m &

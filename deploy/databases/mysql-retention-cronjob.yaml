@@ -67,7 +67,7 @@ spec:
                 - name: MYSQL_ROOT_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: internal-mysql
+                      name: mysql-secrets
                       key: root
               command: ["bash", "-c"]
               args:

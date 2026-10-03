@@ -3,7 +3,10 @@
 # (deploy/databases/jobs/mysql-init.yaml, applied by scripts/deploy.sh after
 # the cluster is ready); users are declarative below. The operator generates
 # passwords for them in the Secret mysql-custom-user-secret (key = username);
-# system/root credentials live in the Secret mysql-secrets.
+# system/root credentials live in the Secret mysql-secrets. Those Service and
+# Secret names are the whole contract the rest of the lab has with MySQL: with
+# `make deploy EXTERNAL_DBS=mysql` this CR (and the operator) are not
+# installed and an external MySQL provides them (docs/external-databases.md).
 apiVersion: pxc.percona.com/v1
 kind: PerconaXtraDBCluster
 metadata:

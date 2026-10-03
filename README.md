@@ -52,9 +52,24 @@ Send telemetry somewhere (e.g. Coroot, or any OTLP endpoint):
 make deploy OTLP_ENDPOINT=my-backend:4317
 ```
 
+Use a MySQL you already have (e.g. one managed by Percona Everest) instead of
+the one the lab installs:
+
+```bash
+make deploy EXTERNAL_DBS=mysql
+```
+
+The lab then installs neither the PXC operator nor the cluster, and `make
+clean` leaves yours alone. The external database just has to be reachable
+under the names the lab uses (`mysql-haproxy`, the `mysql-custom-user-secret`
+and `mysql-secrets` Secrets) — see
+[docs/external-databases.md](docs/external-databases.md) for the full contract
+and the settings it should match.
+
 Other variables: `STORAGE_CLASS=<name>`, `SEED_SIZE_GB=<n>` (0 skips seeding),
 `OTLP_HEADERS=k=v`, `YES=1` (no confirmation prompt). Re-running `make deploy`
-converges idempotently — it is also how you change any of these settings.
+converges idempotently — it is also how you change any of these settings
+(except `EXTERNAL_DBS`, which needs a `make clean` first).
 
 Teardown:
 
@@ -290,3 +305,6 @@ Each is a separate deployable in `services/`, instrumented with OpenTelemetry.
 - `operator/` — the `MaintenanceJob` operator, its embedded web UI, and the
   `dbtool` used by database scenario workloads.
 - `scripts/` — `deploy.sh` / `clean.sh` / `status.sh` driven by the Makefile.
+- `docs/` — [image versions & deploys](docs/images.md),
+  [external databases](docs/external-databases.md),
+  [the operator](docs/operator.md).

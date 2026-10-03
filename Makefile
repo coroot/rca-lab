@@ -5,6 +5,7 @@
 #   make deploy SINGLE_NODE=1            single-node sizing (kind/k3d/minikube)
 #   make deploy STORAGE_CLASS=fast-ssd   explicit storage class (default: cluster default)
 #   make deploy SEED_SIZE_GB=0           skip data seeding
+#   make deploy EXTERNAL_DBS=mysql       use an existing MySQL (docs/external-databases.md)
 #   make deploy OTLP_ENDPOINT=host:4317  send telemetry somewhere (default: discard)
 #   make otel   OTLP_ENDPOINT=... \       reconfigure just the collector, e.g. Coroot:
 #     OTLP_HEADERS=x-api-key=<key> \         auth header (see scripts/deploy.sh for

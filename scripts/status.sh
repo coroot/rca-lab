@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Compact, at-a-glance view of the lab.
 set -euo pipefail
+cd "$(dirname "$0")/.."
+. scripts/lib.sh
 
 bold=$'\033[1m'; dim=$'\033[2m'; grn=$'\033[32m'; ylw=$'\033[33m'; red=$'\033[31m'; rst=$'\033[0m'
 
@@ -12,15 +14,22 @@ db_row() {
     local name=$1 raw=$2 out color
     case "$raw" in
         ready|Ready|True) out=ready; color=$grn ;;
+        external)         out="external (not managed by the lab)"; color=$dim ;;
         "")               out="not deployed"; color=$dim ;;
         *)                out="$raw"; color=$ylw ;;
     esac
     printf '  %-10s %s%s%s\n' "$name" "$color" "$out" "$rst"
 }
 
+[ -n "$EXTERNAL_DBS" ] || EXTERNAL_DBS="$(recorded_external_dbs)"
+
 printf '%sDATABASES%s\n' "$bold" "$rst"
 db_row postgres "$(get perconapgcluster pg '{.status.state}')"
-db_row mysql    "$(get perconaxtradbcluster mysql '{.status.state}')"
+if is_external mysql; then
+    db_row mysql external
+else
+    db_row mysql "$(get perconaxtradbcluster mysql '{.status.state}')"
+fi
 db_row mongodb  "$(get perconaservermongodb mongodb '{.status.state}')"
 db_row valkey   "$(get valkeycluster valkey '{.status.state}')"
 db_row kafka    "$(get kafka kafka '{.status.conditions[?(@.type=="Ready")].status}')"

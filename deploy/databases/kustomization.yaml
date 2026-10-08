@@ -6,3 +6,4 @@ resources:
   - mongodb.yaml
   - valkey.yaml
   - mysql-retention-cronjob.yaml
+  - mongo-retention-cronjob.yaml

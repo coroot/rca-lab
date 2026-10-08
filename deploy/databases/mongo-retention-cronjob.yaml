@@ -1,0 +1,173 @@
+# Bounds MongoDB data growth. The load-generator posts ~20 reviews/s, so the
+# reviews collection grows by ~1.7M documents (~250 MB of collection + index
+# files) a day without limit and eventually fills the replica set's data
+# volumes - and a mongod whose volume is full crashes outright (it cannot even
+# open its diagnostic-data file) and then needs a full resync. This CronJob
+# trims documents older than a retention window in small, paced batches, the
+# same way mysql-retention does for orders/payments.
+#
+# Deletes don't shrink the WiredTiger files, but they free blocks *inside* them
+# that new inserts reuse - so the files plateau at roughly the retained size
+# instead of growing. At ~7 days of load (~12M documents, ~2 GB of collection +
+# index files) the dataset still comfortably exceeds the 0.5 GB WiredTiger cache,
+# which the inefficient-query scenario relies on. (The seeded reviews carry
+# created_at dates spread over the past two years, so the window also retires
+# them; by the time a cleanup is needed they are a rounding error next to the
+# load-generated data.)
+#
+# Why not a TTL index: it is the idiomatic MongoDB mechanism, but the TTL
+# monitor is unpaced - with a backlog it deletes as fast as it can for up to a
+# minute at a time, every minute, on the primary, and every delete is an oplog
+# entry the secondaries must apply. The point here is a cleanup that never shows
+# up as a performance event, so it is paced explicitly.
+#
+# Low-impact on live review traffic (this is the review-service's replica set):
+#   * Small batches (BATCH=200): each batch is one deleteMany by _id, so one
+#     short oplog burst for the secondaries to apply - never a single
+#     multi-million-document delete that would stall the appliers.
+#   * A low delete rate (~150 docs/s, under ten times the insert rate; a batch
+#     of 200 cold documents takes ~0.8 s to find, delete and majority-ack, plus
+#     a 0.5 s pause): WiredTiger is
+#     copy-on-write, so every leaf page a delete touches is rewritten in full at
+#     the next checkpoint and the old blocks are only freed after it. Deleting
+#     through the product_id index touches a different, random leaf page per
+#     document, so the transient space a run needs is roughly (deletes per
+#     checkpoint interval) x (page size) - at 1000 docs/s that is hundreds of MB
+#     per minute, enough to push a nearly-full volume over the edge (seen in the
+#     lab: ENOSPC and a crashed member). At ~150 docs/s it stays around 100 MB.
+#     Measured on the lab: review API p50/p95 unchanged during a run.
+#   * Every batch is written with w:"majority", so the job can never run ahead
+#     of the majority of the set by more than one batch.
+#   * Lag-aware pacing: after each batch the job reads the primary's majority
+#     lag (hello.lastWrite: lastWriteDate - majorityWriteDate) and, if the
+#     secondaries have fallen behind, backs off hard (LAG_SLEEP_MS) so they
+#     drain first. This keeps the set well clear of MongoDB's own flow control
+#     (which, once majority lag nears flowControlTargetLagSeconds, throttles
+#     EVERY writer on the primary - including the application).
+#   * The oldest documents are found through the created_at index (hinted, so a
+#     missing index fails loudly instead of sorting the whole collection), and
+#     the cutoff scan is bounded to one batch at a time.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongo-retention
+  namespace: default
+  labels:
+    app: mongo-retention
+spec:
+  schedule: "47 */4 * * *"      # every 4h at :47 - infrequent + gentle enough to stay below the anomaly detector; offset from mysql-retention (:17)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 4200     # MAX_BATCHES x (~0.8s batch + SLEEP_MS) ≈ 52 min, plus slack
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: mongo-retention
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: retention
+              # Reuse the PSMDB image (already on every node) for a matching mongosh.
+              image: docker.io/percona/percona-server-mongodb:7.0.39
+              env:
+                - name: RETENTION_DAYS
+                  value: "7"
+                - name: BATCH               # documents per deleteMany → one small oplog burst per batch
+                  value: "200"
+                - name: MAX_BATCHES         # cap deletions per run (480k, ~50 min) so a backlog catches up gradually
+                  value: "2400"
+                - name: SLEEP_MS            # base pause between batches; BATCH/SLEEP keeps delete throughput
+                  value: "500"              # ~150 docs/s: ~4h of inserts (~290k) trimmed in ~30 min
+                - name: LAG_MAX_MS          # majority lag above which the job backs off
+                  value: "1000"
+                - name: LAG_SLEEP_MS        # longer pause after a batch that left the majority lagging
+                  value: "3000"
+                - name: MONGO_HOST
+                  value: "mongodb-rs0:27017"
+                - name: MONGO_USER
+                  value: reviews
+                - name: MONGO_PW
+                  valueFrom:
+                    secretKeyRef:
+                      name: mongodb-custom-user-secret
+                      key: reviews
+              # Credentials are read from process.env inside mongosh and never
+              # appear on the command line or in the logs.
+              command:
+                - mongosh
+                - --nodb
+                - --quiet
+                - --eval
+                - |
+                  const env = (k, d) => process.env[k] ?? d;
+                  const RETENTION_DAYS = +env('RETENTION_DAYS', 7);
+                  const BATCH = +env('BATCH', 200);
+                  const MAX_BATCHES = +env('MAX_BATCHES', 2400);
+                  const SLEEP_MS = +env('SLEEP_MS', 500);
+                  const LAG_MAX_MS = +env('LAG_MAX_MS', 1000);
+                  const LAG_SLEEP_MS = +env('LAG_SLEEP_MS', 3000);
+
+                  const u = encodeURIComponent(env('MONGO_USER'));
+                  const p = encodeURIComponent(env('MONGO_PW'));
+                  // readPreference=primary: the cutoff scan must see the deletes it
+                  // just made, not a secondary's stale view of them.
+                  const uri = `mongodb://${u}:${p}@${env('MONGO_HOST')}/reviews?replicaSet=rs0&authSource=reviews&readPreference=primary&appName=mongo-retention`;
+                  const conn = Mongo(uri);
+                  const db = conn.getDB('reviews');
+                  const coll = db.getCollection('reviews');
+
+                  // Majority lag as seen by the primary: how far the majority-committed
+                  // point trails its latest write. Readable by any authenticated user.
+                  const majorityLagMs = () => {
+                    const lw = db.hello().lastWrite;
+                    if (!lw || !lw.lastWriteDate || !lw.majorityWriteDate) return 0;
+                    return Math.max(0, lw.lastWriteDate - lw.majorityWriteDate);
+                  };
+
+                  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400e3);
+                  print(`mongo-retention: keep ${RETENTION_DAYS}d (cutoff = ${cutoff.toISOString()}), ~${coll.estimatedDocumentCount()} documents in reviews.reviews`);
+
+                  let total = 0, i = 0, failures = 0;
+                  while (i < MAX_BATCHES) {
+                    let ids, n = 0, lag = 0;
+                    const t0 = Date.now();
+                    try {
+                      // Oldest documents past the cutoff, via the created_at index.
+                      ids = coll.find({ created_at: { $lt: cutoff } }, { _id: 1 })
+                        .sort({ created_at: 1 }).hint({ created_at: -1 }).limit(BATCH)
+                        .toArray().map(d => d._id);
+                      if (ids.length === 0) break;
+                      // Majority-acknowledged, so the job never outruns the majority of
+                      // the set by more than one batch.
+                      n = coll.deleteMany({ _id: { $in: ids } }, { writeConcern: { w: 'majority', wtimeout: 10000 } }).deletedCount;
+                      lag = majorityLagMs();
+                      failures = 0;
+                    } catch (e) {
+                      // A write-concern timeout means the secondaries are struggling; a
+                      // server-selection error means an election is in progress. Either
+                      // way back off and retry; give up only if it persists.
+                      print(`      batch failed: ${e.name}: ${e.message}`);
+                      if (++failures >= 10) throw e;
+                      sleep(LAG_SLEEP_MS * failures);
+                      continue;
+                    }
+                    const ms = Date.now() - t0;
+                    total += n; i++;
+                    if (i % 50 === 0 || lag > LAG_MAX_MS) print(`      batch ${i}: -${n} in ${ms}ms (majority lag ${lag}ms, total -${total})`);
+                    if (ids.length < BATCH) break;
+                    // If the secondaries are behind, this job is the likeliest reason:
+                    // back off hard so they drain before the next batch.
+                    sleep(lag > LAG_MAX_MS ? LAG_SLEEP_MS : SLEEP_MS);
+                  }
+                  print(`mongo-retention: pass complete, deleted ${total} documents in ${i} batches${i >= MAX_BATCHES ? ' (MAX_BATCHES reached, more remain)' : ''}`);
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi

@@ -27,3 +27,5 @@ resources:
   - reliability/mysql-galera-cert-conflicts.yaml
   - reliability/pg-xid-wraparound.yaml
   - reliability/pg-checkpoints-stalled.yaml
+  - reliability/mongo-replica-network-fencing.yaml
+  - reliability/mongo-replication-lag.yaml

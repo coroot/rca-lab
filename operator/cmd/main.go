@@ -97,7 +97,7 @@ func runManager(_ []string) {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(api.NewServer(mgr.GetClient(), ":8080")); err != nil {
+	if err := mgr.Add(api.NewServer(mgr.GetClient(), ":8080", namespace)); err != nil {
 		setupLog.Error(err, "unable to add API/UI server")
 		os.Exit(1)
 	}

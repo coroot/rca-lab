@@ -27,9 +27,6 @@ import (
 	"github.com/coroot/rca-lab/operator/api/v1alpha1"
 )
 
-// scenarioNamespace is the single namespace all scenarios live in.
-const scenarioNamespace = "default"
-
 // defaultRunDuration is used when POST /run omits durationSeconds.
 const defaultRunDuration = 900 * time.Second
 
@@ -38,14 +35,15 @@ var webFS embed.FS
 
 // Server is a manager.Runnable that serves the REST API and web UI.
 type Server struct {
-	client client.Client
-	addr   string
+	client    client.Client
+	addr      string
+	namespace string // where the scenarios live: the operator's own namespace
 }
 
 // NewServer builds a Server backed by the given client, listening on addr
-// (e.g. ":8080").
-func NewServer(c client.Client, addr string) *Server {
-	return &Server{client: c, addr: addr}
+// (e.g. ":8080"), serving the scenarios in namespace.
+func NewServer(c client.Client, addr, namespace string) *Server {
+	return &Server{client: c, addr: addr, namespace: namespace}
 }
 
 // Start runs the HTTP server until ctx is cancelled, then shuts it down
@@ -161,7 +159,7 @@ func summarize(fs *v1alpha1.MaintenanceJob) scenarioSummary {
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	list := &v1alpha1.MaintenanceJobList{}
-	if err := s.client.List(r.Context(), list, client.InNamespace(scenarioNamespace)); err != nil {
+	if err := s.client.List(r.Context(), list, client.InNamespace(s.namespace)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -262,7 +260,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	list := &v1alpha1.MaintenanceJobList{}
-	if err := s.client.List(r.Context(), list, client.InNamespace(scenarioNamespace)); err != nil {
+	if err := s.client.List(r.Context(), list, client.InNamespace(s.namespace)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -283,7 +281,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) get(ctx context.Context, name string) (*v1alpha1.MaintenanceJob, error) {
 	fs := &v1alpha1.MaintenanceJob{}
-	key := types.NamespacedName{Namespace: scenarioNamespace, Name: name}
+	key := types.NamespacedName{Namespace: s.namespace, Name: name}
 	if err := s.client.Get(ctx, key, fs); err != nil {
 		return nil, err
 	}
@@ -295,7 +293,7 @@ func (s *Server) get(ctx context.Context, name string) (*v1alpha1.MaintenanceJob
 func (s *Server) mutate(ctx context.Context, name string, apply func(*v1alpha1.MaintenanceJob)) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		fs := &v1alpha1.MaintenanceJob{}
-		key := types.NamespacedName{Namespace: scenarioNamespace, Name: name}
+		key := types.NamespacedName{Namespace: s.namespace, Name: name}
 		if err := s.client.Get(ctx, key, fs); err != nil {
 			return err
 		}
